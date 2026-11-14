@@ -130,6 +130,21 @@ export const LOGIN_CAROUSEL: CarouselSlide[] = [
   { title: '🔔 Real-Time Audio Alerts & Signal Logs', body: 'Browser sound chimes and live execution logs when setups reach entry confirmation.' },
 ];
 
+/**
+ * MODULE 8  Pre-filled WhatsApp licence-request template.
+ * `{PRODUCT}`, `{OWNER}` and `{WHATSAPP}` are substituted server-side so the
+ * owner can rebrand without editing three different places.
+ */
+export const DEFAULT_WHATSAPP_TEMPLATE = [
+  'Assalam-o-Alaikum! I would like to request an *Alpha X Scanner Pro* license.',
+  '',
+  '👤 Name:',
+  '🏙 City:',
+  '📦 Plan Interested In:',
+  '',
+  'Looking forward to hearing from you.',
+].join('\n');
+
 export const DEFAULT_SYSTEM_CONFIG: SystemConfig = {
   versionBadge: BRAND.defaultVersionBadge,
   loginPageTitle: BRAND.loginTitle,
@@ -139,6 +154,10 @@ export const DEFAULT_SYSTEM_CONFIG: SystemConfig = {
   promoTagline: BRAND.promoTagline,
   whatsappContact: BRAND.whatsappContact,
   loginCarouselJson: LOGIN_CAROUSEL,
+  productName: BRAND.productName,
+  whatsappMessageTemplate: DEFAULT_WHATSAPP_TEMPLATE,
+  loginFeaturesJson: LOGIN_FEATURES.map((f) => ({ id: f.id, title: f.title, body: f.body, icon: f.icon })),
+  broadcast: null,
 };
 
 /**

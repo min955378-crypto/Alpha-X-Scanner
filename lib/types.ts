@@ -417,7 +417,7 @@ export type ServerMessage =
   | { type: 'boot'; boot: BootStatus }
   | { type: 'riskwatch'; updatedAt: number }
   | { type: 'access'; entitlements: Record<EntitlementKey, boolean> }
-  | { type: 'broadcast'; title: string; body: string; level: 'info' | 'warn' }
+  | { type: 'broadcast'; title: string; body: string; level: BroadcastLevel; severity: BroadcastSeverity; createdAt: number }
   | { type: 'pong'; t: number };
 
 export type ClientMessage =
@@ -514,6 +514,40 @@ export interface SystemConfig {
   promoTagline: string;
   whatsappContact: string;
   loginCarouselJson: CarouselSlide[] | null;
+  /** MODULE 8  Editable product name shown across the terminal chrome. */
+  productName: string;
+  /** MODULE 8  Pre-filled WhatsApp licence-request message template. */
+  whatsappMessageTemplate: string;
+  /**
+   * MODULE 8  The 12 login feature cards (icon / title / description).
+   * Null means "use the built-in factory copy", so a fresh deployment still
+   * renders without a seeded config row.
+   */
+  loginFeaturesJson: LoginFeatureRow[] | null;
+  /** MODULE 8  Global broadcast banner pushed to every connected socket. */
+  broadcast: BroadcastState | null;
+}
+
+export interface LoginFeatureRow {
+  id: string;
+  title: string;
+  body: string;
+  icon: string;
+}
+
+export type BroadcastSeverity = 'INFO' | 'BULLISH' | 'WARNING' | 'URGENT';
+
+/** Wire-level severity the toast component already understands. */
+export type BroadcastLevel = 'info' | 'warn';
+
+export interface BroadcastState {
+  title: string;
+  message: string;
+  severity: BroadcastSeverity;
+  createdAt: number;
+  createdBy: string;
+  /** When the banner stops being served to newly-connecting clients. */
+  expiresAt: number | null;
 }
 
 export interface CarouselSlide {

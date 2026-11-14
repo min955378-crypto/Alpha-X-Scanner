@@ -104,6 +104,20 @@ export interface DbSnapshot {
   riskItems: RiskWatchItem[];
   customSignals: CustomSignal[];
   auditLogs: AuditLogRow[];
+  coinOverrides: CoinOverrideRow[];
+}
+
+/**
+ * MODULE 6  An admin's explicit enable / ⚠ Monitoring Tag choice for a coin.
+ * Persisted because the engine store is in-memory only — without this an
+ * override would vanish on restart and never appear in a backup.
+ */
+export interface CoinOverrideRow {
+  symbol: string;
+  enabled: boolean;
+  isMonitoringTag: boolean;
+  manualTagOverride: boolean;
+  updatedAt: number;
 }
 
 interface DbShape {
@@ -114,6 +128,7 @@ interface DbShape {
   riskItems: RiskWatchItem[];
   customSignals: CustomSignal[];
   auditLogs: AuditLogRow[];
+  coinOverrides: Record<string, CoinOverrideRow>;
   secret: string;
   /** §2.2  Set once the stored snapshot has been promoted to full access. */
   unlockedAllAt?: number | null;
@@ -320,6 +335,7 @@ function seed(): DbShape {
     systemConfig: { ...DEFAULT_SYSTEM_CONFIG },
     riskItems: [],
     customSignals: [],
+    coinOverrides: {},
     auditLogs: [],
     secret: randomBytes(32).toString('hex'),
   };
@@ -349,6 +365,8 @@ class Database {
   licenses = new Map<string, LicenseRecord>();
   /** §13 ScannerConfig @@id slug */
   scannerConfigs = new Map<ScannerSlug, ScannerConfigRow>();
+  /** MODULE 6  Operator coin overrides (enable + ⚠ Monitoring Tag). */
+  coinOverrides: Record<string, CoinOverrideRow> = {};
   /** §13 SystemConfig singleton (id = 'default') */
   systemConfig: SystemConfig = { ...DEFAULT_SYSTEM_CONFIG };
   /** §13 RiskWatchItem @@id id · @@unique([sourceUrl]) · @@index([publishedAt]) */
@@ -514,6 +532,7 @@ class Database {
         riskItems: [...this.riskItems.values()],
         customSignals: [...this.customSignals.values()],
         auditLogs: this.auditLogs.slice(0, 500),
+        coinOverrides: this.coinOverrides,
         secret: this.secret,
         unlockedAllAt: this.unlockedAllAt,
       };
@@ -848,6 +867,26 @@ class Database {
   /* ------------------------ backup & restore (MODULE 9) ------------------ */
 
   /** MODULE 9  Full state export — everything needed to rebuild from scratch. */
+  /* ------------------------------ coins (§6) ----------------------------- */
+
+  /** Record an operator override and persist it so it survives a restart. */
+  setCoinOverride(
+    symbol: string,
+    patch: { enabled?: boolean; isMonitoringTag?: boolean },
+  ): CoinOverrideRow {
+    const prev = this.coinOverrides[symbol];
+    const next: CoinOverrideRow = {
+      symbol,
+      enabled: patch.enabled ?? prev?.enabled ?? true,
+      isMonitoringTag: patch.isMonitoringTag ?? prev?.isMonitoringTag ?? false,
+      manualTagOverride: patch.isMonitoringTag !== undefined ? true : (prev?.manualTagOverride ?? false),
+      updatedAt: Date.now(),
+    };
+    this.coinOverrides[symbol] = next;
+    this.persist();
+    return next;
+  }
+
   exportSnapshot(): DbSnapshot {
     return {
       version: SNAPSHOT_VERSION,
@@ -859,6 +898,7 @@ class Database {
       riskItems: [...this.riskItems.values()],
       customSignals: [...this.customSignals.values()],
       auditLogs: this.auditLogs,
+      coinOverrides: Object.values(this.coinOverrides),
     };
   }
 
@@ -877,7 +917,14 @@ class Database {
       return { ok: false, error: 'BAD_PAYLOAD' };
     }
 
-    const counts: Record<string, number> = { users: 0, licenses: 0, scannerConfigs: 0, riskItems: 0, customSignals: 0 };
+    const counts: Record<string, number> = {
+      users: 0,
+      licenses: 0,
+      scannerConfigs: 0,
+      riskItems: 0,
+      customSignals: 0,
+      coinOverrides: 0,
+    };
 
     for (const u of s.users ?? []) {
       if (!u?.id || !u.username) continue;
@@ -912,6 +959,16 @@ class Database {
       if (!this.customSignals.has(sig.id)) {
         this.customSignals.set(sig.id, sig);
         counts.customSignals += 1;
+      }
+    }
+    for (const c of s.coinOverrides ?? []) {
+      if (!c?.symbol) continue;
+      /* Newest wins: a backup taken later reflects the operator's latest
+         intent, so it replaces an older stored override. */
+      const prev = this.coinOverrides[c.symbol];
+      if (!prev || c.updatedAt >= prev.updatedAt) {
+        this.coinOverrides[c.symbol] = c;
+        counts.coinOverrides += 1;
       }
     }
     if (s.systemConfig && typeof s.systemConfig === 'object') {

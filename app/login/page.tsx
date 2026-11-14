@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 
 import { BRAND, LOGIN_FEATURES } from '@/lib/constants';
+import type { LoginFeatureRow } from '@/lib/types';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { AuroraBackground, TiltCard } from '@/components/ui/Motion3D';
 import { Icon } from '@/components/ui/Icons';
@@ -18,7 +19,7 @@ import { Icon } from '@/components/ui/Icons';
  */
 export default function LoginPage() {
   const router = useRouter();
-  const { user, loading, login, error } = useAuth();
+  const { user, loading, login, error, systemConfig } = useAuth();
 
   const [splashDone, setSplashDone] = useState(false);
   const [username, setUsername] = useState('');
@@ -176,7 +177,7 @@ export default function LoginPage() {
               </p>
             </header>
 
-            <FeatureShowcase />
+            <FeatureShowcase features={systemConfig.loginFeaturesJson ?? LOGIN_FEATURES} />
           </div>
         </div>
       </main>
@@ -192,8 +193,8 @@ export default function LoginPage() {
  * Two duplicated columns scrolled by a CSS marquee. Duplicating is what makes
  * the loop seamless; the track pauses on hover/focus so a customer can read.
  */
-function FeatureShowcase() {
-  const track = [...LOGIN_FEATURES, ...LOGIN_FEATURES];
+function FeatureShowcase({ features }: { features: LoginFeatureRow[] }) {
+  const track = [...features, ...features];
 
   return (
     <div
@@ -212,7 +213,7 @@ function FeatureShowcase() {
             >
               <div className="mb-2 flex items-start gap-2.5">
                 <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-500/12 text-emerald-400 ring-1 ring-emerald-400/25">
-                  <Icon name={f.icon} size={15} />
+                  <Icon name={(f.icon || 'spark') as 'spark'} size={15} />
                 </span>
                 <h3 className="font-display text-[12.5px] font-bold leading-snug text-white">
                   {f.title}

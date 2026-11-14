@@ -125,6 +125,7 @@ class Engine {
     }
 
     this.store.setUniverse(entries);
+    this.applyCoinOverrides();
     this.boot.total = entries.length;
     this.boot.phase = 'PHASE_A';
 
@@ -336,6 +337,80 @@ class Engine {
     for (const slug of this.requestedScanners) {
       this.emit({ type: 'signals', scannerSlug: slug, signals: this.getSignals(slug) });
     }
+  }
+
+  /**
+   * MODULE 6  Re-apply the operator's persisted coin overrides after a
+   * universe rebuild, so an admin's enable / ⚠ decisions survive a restart or
+   * a forced reseed instead of reverting to the exchange defaults.
+   */
+  private applyCoinOverrides(): number {
+    const overrides = getDb().coinOverrides;
+    let applied = 0;
+    for (const [symbol, o] of Object.entries(overrides)) {
+      const st = this.store.symbols.get(symbol);
+      if (!st) continue;
+      st.enabled = o.enabled;
+      st.isMonitoringTag = o.isMonitoringTag;
+      st.manualTagOverride = o.manualTagOverride;
+      applied += 1;
+    }
+    return applied;
+  }
+
+  /**
+   * MODULE 1  Force Market Reseed.
+   *
+   * Re-fetches the exchange universe (live if reachable, bundled snapshot
+   * otherwise) and restarts the Phase A warm-up / Phase B 500-candle backfill
+   * ladder. Existing symbol state is reused wherever the symbol still exists so
+   * the terminal never goes blank mid-reseed.
+   */
+  async reseed(): Promise<{ coins: number; mode: 'LIVE' | 'SIMULATED' }> {
+    const monitoring = monitoringTagSet();
+    let entries = await fetchUniverse(monitoring);
+    if (entries) {
+      this.dataMode = 'LIVE';
+    } else {
+      entries = buildUniverse();
+      this.dataMode = 'SIMULATED';
+    }
+
+    this.store.setUniverse(entries);
+    this.applyCoinOverrides();
+    this.boot.total = entries.length;
+    this.boot.seeded = 0;
+    this.boot.phaseAReady = false;
+    this.boot.phaseBReady = false;
+    this.boot.phaseAElapsedSec = null;
+    this.boot.phase = 'PHASE_A';
+    this.frames.clear();
+    this.signals.clear();
+
+    if (this.phaseATimer) clearInterval(this.phaseATimer);
+    if (this.phaseBTimer) clearInterval(this.phaseBTimer);
+    this.phaseBTimer = null;
+
+    this.seedQueue = this.store.order.slice();
+    this.phaseATimer = setInterval(() => {
+      const symbol = this.seedQueue.shift();
+      if (!symbol) {
+        if (this.phaseATimer) clearInterval(this.phaseATimer);
+        this.phaseATimer = null;
+        this.boot.phaseAReady = true;
+        this.boot.phaseAElapsedSec = Math.round(((Date.now() - this.startedAt) / 1000) * 10) / 10;
+        this.boot.phase = 'PHASE_B';
+        this.startPhaseB();
+        return;
+      }
+      this.store.seedSymbol(symbol, Date.now());
+      this.meter.add(klinesWeight(99));
+      this.boot.seeded += 1;
+      this.emitBoot();
+    }, Math.max(5, Math.round(1000 / PHASE_A_RPS)));
+
+    this.emitBoot();
+    return { coins: entries.length, mode: this.dataMode };
   }
 
   /**

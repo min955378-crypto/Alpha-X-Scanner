@@ -31,16 +31,22 @@ export async function POST(req: Request) {
     coin.manualTagOverride = true;
   }
 
+  /* Persist the override so it survives a restart and travels in a backup —
+     the engine store is in-memory only. */
   const db = getDb();
+  const saved = db.setCoinOverride(coin.entry.symbol, {
+    enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
+    isMonitoringTag: typeof body.isMonitoringTag === 'boolean' ? body.isMonitoringTag : undefined,
+  });
   db.audit(admin.username, 'COIN_UPDATE', body.symbol);
 
   return NextResponse.json({
     ok: true,
     coin: {
-      symbol: coin.entry.symbol,
-      enabled: coin.enabled,
-      isMonitoringTag: coin.isMonitoringTag,
-      manualTagOverride: coin.manualTagOverride,
+      symbol: saved.symbol,
+      enabled: saved.enabled,
+      isMonitoringTag: saved.isMonitoringTag,
+      manualTagOverride: saved.manualTagOverride,
     },
   });
 }

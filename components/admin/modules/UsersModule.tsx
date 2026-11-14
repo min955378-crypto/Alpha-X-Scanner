@@ -65,7 +65,7 @@ export function UsersModule({
 
   const submitPassword = async () => {
     if (!pwUser) return;
-    const ok = await act({ action: 'change-password', userId: pwUser.id, newPassword: newPw }, `Password updated for ${pwUser.username}.`);
+    const ok = await act({ action: 'reset-password', userId: pwUser.id, password: newPw }, `Password updated for ${pwUser.username}.`);
     if (ok) {
       setPwUser(null);
       setNewPw('');
@@ -174,7 +174,7 @@ export function UsersModule({
                             disabled={busy}
                             onClick={() =>
                               void act(
-                                { action: 'set-suspended', userId: u.id, suspended: !u.isSuspended },
+                                { action: 'suspend', userId: u.id, value: !u.isSuspended },
                                 u.isSuspended ? `${u.username} unsuspended.` : `${u.username} suspended — socket dropped.`,
                               )
                             }
@@ -281,7 +281,9 @@ function relative(ts: number | null): string {
 const USER_ERRORS: Record<string, string> = {
   LICENSE_NOT_FOUND: 'No such license key exists.',
   LICENSE_IN_USE: 'That key is already bound to another customer.',
-  PASSWORD_TOO_SHORT: 'Password must be at least 6 characters.',
-  NOT_FOUND: 'User no longer exists.',
+  MISSING_PASSWORD: 'Enter a new password.',
+  TOO_SHORT: 'Password must be at least 6 characters.',
+  USER_NOT_FOUND: 'User no longer exists.',
+  BAD_ACTION: 'That action is not supported.',
   FORBIDDEN: 'Admin access required.',
 };
