@@ -1,0 +1,15 @@
+//@version=5
+indicator("Alpha Sniper", shorttitle="Alpha Sniper", overlay=false, precision=1)
+
+rsiLen     = input.int(14, "RSI Length", minval=1)
+smoothLen  = input.int(3,  "Smoothing EMA Length", minval=1)
+
+rsiRaw      = ta.rsi(close, rsiLen)
+alphaSniper = ta.ema(rsiRaw, smoothLen)
+
+hUpper = hline(70.0, "Upper Band (70)", color=color.new(#8B5CF6, 45), linestyle=hline.style_dashed, linewidth=1)
+hMid   = hline(50.0, "Midline (50)",    color=color.new(#7E8FA6, 65), linestyle=hline.style_dotted, linewidth=1)
+hLower = hline(30.0, "Lower Band (30)", color=color.new(#8B5CF6, 45), linestyle=hline.style_dashed, linewidth=1)
+
+fill(hUpper, hLower, color=color.new(#8B5CF6, 88), title="Alpha Sniper 30-70 Zone")
+plot(alphaSniper, title="Alpha Sniper", color=color.new(#8B5CF6, 0), linewidth=2)

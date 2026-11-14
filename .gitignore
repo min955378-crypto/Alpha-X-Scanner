@@ -1,0 +1,17 @@
+node_modules/
+.next/
+out/
+build/
+dist/
+coverage/
+.env
+.env*.local
+*.tsbuildinfo
+next-env.d.ts
+.DS_Store
+npm-debug.log*
+yarn-error.log*
+
+# Runtime state written by the embedded store (git-ignored on purpose:
+# swap the repository layer for Postgres/Redis in production — see README).
+.data/
