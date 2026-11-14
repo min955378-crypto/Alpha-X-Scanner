@@ -79,7 +79,32 @@ export function AuroraBackground({ className = '' }: { className?: string }) {
       pointer.ty = (e.clientY - rect.top) / Math.max(1, rect.height);
     };
 
+    /* §5.3  Throttle the ambient loop to ~30fps and hard-pause it when the tab
+       is hidden. A background canvas has no business competing with the data
+       grid for the main thread or the battery. */
+    const TARGET_FPS = 30;
+    const FRAME_MS = 1000 / TARGET_FPS;
+    let last = 0;
+    let paused = document.hidden;
+
+    const onVisibility = () => {
+      paused = document.hidden;
+      if (!paused) {
+        last = 0;
+        raf = requestAnimationFrame(draw);
+      } else if (raf) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      }
+    };
+
     const draw = (t: number) => {
+      if (paused) return;
+      if (last && t - last < FRAME_MS) {
+        raf = requestAnimationFrame(draw);
+        return;
+      }
+      last = t;
       // Ease toward the pointer so parallax glides instead of snapping.
       pointer.x += (pointer.tx - pointer.x) * 0.045;
       pointer.y += (pointer.ty - pointer.y) * 0.045;
@@ -139,12 +164,14 @@ export function AuroraBackground({ className = '' }: { className?: string }) {
     resize();
     window.addEventListener('resize', resize);
     window.addEventListener('pointermove', onPointer, { passive: true });
+    document.addEventListener('visibilitychange', onVisibility);
     raf = requestAnimationFrame(draw);
 
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', resize);
       window.removeEventListener('pointermove', onPointer);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
 
@@ -166,7 +193,13 @@ export function AuroraBackground({ className = '' }: { className?: string }) {
           }}
         />
       </div>
-      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 h-full w-full"
+        /* §5.3  Promote to its own compositor layer so the aurora never
+           repaints the data grid above it. */
+        style={{ willChange: 'transform', transform: 'translateZ(0)' }}
+      />
       {/* Vignette keeps text legible over the brightest orb. */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_35%,rgba(7,10,18,0.82)_100%)]" />
     </div>

@@ -206,7 +206,10 @@ function FeatureShowcase() {
       <div className="marquee-vertical grid grid-cols-1 gap-3 sm:grid-cols-2">
         {track.map((f, i) => (
           <TiltCard key={`${f.id}-${i}`} max={5} className="rounded-xl">
-            <article className="glass h-full rounded-xl p-3.5">
+            <article
+              className="glass laser-border h-full rounded-xl p-3.5"
+              style={{ ['--laser-color' as string]: '#00d26a' }}
+            >
               <div className="mb-2 flex items-start gap-2.5">
                 <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-500/12 text-emerald-400 ring-1 ring-emerald-400/25">
                   <Icon name={f.icon} size={15} />

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { BRAND, LOGIN_CAROUSEL } from '@/lib/constants';
 import { formatDateShort, formatPct } from '@/lib/format';
+import { planLabel } from '@/lib/license';
 import { SCANNERS, TIMEFRAMES, type AuditLogRow, type EntitlementKey, type LicenseKeyRow, type ScannerConfigRow, type ScannerSlug, type SystemConfig, type SystemHealth, type Timeframe } from '@/lib/types';
 import { CopyButton, Pill, Segmented, Toggle } from '@/components/ui';
 import { useSettings } from '@/components/providers/SettingsProvider';
@@ -304,7 +305,7 @@ function UsersModule({ data, mutate }: { data: Overview; mutate: (u: string, b: 
                   </div>
                 </td>
                 <td className="px-2 py-1.5">
-                  <Pill tone={u.plan === 'ULTRA_PRO' ? 'green' : 'gray'}>{u.plan}</Pill>
+                  <Pill tone={u.plan === 'ULTRA_PRO' ? 'green' : 'gray'}>{planLabel()}</Pill>
                 </td>
                 <td className="px-2 py-1.5">
                   {u.licenseKey ? (
@@ -345,7 +346,7 @@ function UsersModule({ data, mutate }: { data: Overview; mutate: (u: string, b: 
                       onClick={() => void mutate('/api/admin/users', { action: 'grant-full', userId: u.id })}
                       className="btn-ghost px-1.5 py-0.5 text-[10px]"
                     >
-                      Grant Full Ultra Pro
+                      Grant Full Alpha X Pro
                     </button>
                     <button
                       type="button"
@@ -376,7 +377,7 @@ function LicensesModule({ data, mutate }: { data: Overview; mutate: (u: string, 
   const [generated, setGenerated] = useState<string[]>([]);
 
   const welcome = (key: string) =>
-    `Assalam-o-Alaikum! Your Alpha X Scanner access is ready.\nLicense Key: ${key}\nUsername: <set by you>\nOpen: https://alpha-x-scanner.com/login\nWatch the 2-click login guide: https://www.youtube.com/watch?v=AOtweJ-XWbk\n— Muhammad Ibrahim (${BRAND.whatsappContact})`;
+    `Assalam-o-Alaikum! Your Alpha X Scanner access is ready.\nLicense Key: ${key}\nUsername: <set by you>\nOpen: https://alpha-x-scanner.com/login\nYour key unlocks all five institutional scanners.\n— ${BRAND.brandWatermark} (${BRAND.whatsappContact})`;
 
   return (
     <div className="space-y-3">
@@ -391,15 +392,15 @@ function LicensesModule({ data, mutate }: { data: Overview; mutate: (u: string, 
             <span className="mb-1 block text-[10.5px] text-text-secondary">Duration</span>
             <select value={duration} onChange={(e) => setDuration(Number(e.target.value))} className="input">
               <option value={7}>7d Trial</option>
-              <option value={30}>30d Ultra Pro</option>
-              <option value={90}>90d Ultra Pro</option>
+              <option value={30}>30d Alpha X Pro</option>
+              <option value={90}>90d Alpha X Pro</option>
               <option value={3650}>Lifetime</option>
             </select>
           </label>
           <label className="block">
             <span className="mb-1 block text-[10.5px] text-text-secondary">Plan</span>
             <select value={plan} onChange={(e) => setPlan(e.target.value as 'LITE' | 'ULTRA_PRO')} className="input">
-              <option value="ULTRA_PRO">Ultra Pro (all 5 scanners)</option>
+              <option value="ULTRA_PRO">Alpha X Pro (all 5 scanners)</option>
               <option value="LITE">Lite (V1 Scaling only)</option>
             </select>
           </label>
@@ -455,7 +456,7 @@ function LicensesModule({ data, mutate }: { data: Overview; mutate: (u: string, 
                   <code className="mono-num select-all text-white">{l.keyString}</code>
                 </td>
                 <td className="px-2 py-1.5">
-                  <Pill tone={l.plan === 'ULTRA_PRO' ? 'green' : 'gray'}>{l.plan}</Pill>
+                  <Pill tone={l.plan === 'ULTRA_PRO' ? 'green' : 'gray'}>{planLabel()}</Pill>
                 </td>
                 <td className="px-2 py-1.5">
                   <Pill tone={l.status === 'ACTIVE' ? 'green' : 'red'}>{l.status}</Pill>

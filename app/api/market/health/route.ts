@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { getEngine } from '@/server/engine';
+import { activeProviderId } from '@/server/engine/binance';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,6 +14,7 @@ export async function GET() {
     ok: true,
     boot: engine.boot,
     dataMode: engine.dataMode,
+    provider: activeProviderId(),
     cycle: engine.cycle,
     nextUpdateSec: engine.secondsToNextCycle(),
     coins: engine.store.symbols.size,

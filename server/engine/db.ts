@@ -94,7 +94,26 @@ interface DbShape {
   riskItems: RiskWatchItem[];
   auditLogs: AuditLogRow[];
   secret: string;
+  /** §2.2  Set once the stored snapshot has been promoted to full access. */
+  unlockedAllAt?: number | null;
 }
+
+/** §2.2  Column lists the unlock migration walks. */
+const ENTITLEMENT_KEYS: EntitlementKey[] = [
+  'canAccessV1Scaling',
+  'canAccessOrderBlock',
+  'canAccessEmaCrossover',
+  'canAccessHiddenBullish',
+  'canAccessAlphaSniper',
+];
+
+const GRANT_KEYS = [
+  'grantV1Scaling',
+  'grantOrderBlock',
+  'grantEmaCrossover',
+  'grantHiddenBullish',
+  'grantAlphaSniper',
+] as const;
 
 /* --------------------------------- crypto --------------------------------- */
 
@@ -136,13 +155,26 @@ const ALL_ENTITLEMENTS: Entitlements = {
   canAccessAlphaSniper: true,
 };
 
+/**
+ * §2  EVERY active license key unlocks 100% of the platform.
+ *
+ * Access is gated purely by license status (ACTIVE vs EXPIRED/REVOKED) and
+ * remaining duration — never by locking individual scanner tabs. LITE is kept
+ * as a plan label only (it drives device slots), so it carries the same full
+ * entitlement set as ULTRA_PRO.
+ */
 const LITE_ENTITLEMENTS: Entitlements = {
   canAccessV1Scaling: true,
-  canAccessOrderBlock: false,
-  canAccessEmaCrossover: false,
-  canAccessHiddenBullish: false,
-  canAccessAlphaSniper: false,
+  canAccessOrderBlock: true,
+  canAccessEmaCrossover: true,
+  canAccessHiddenBullish: true,
+  canAccessAlphaSniper: true,
 };
+
+/** §2.2  Both seeded accounts get every scanner out of the box. */
+export function fullEntitlements(): Entitlements {
+  return { ...ALL_ENTITLEMENTS };
+}
 
 function defaultScannerConfigs(): ScannerConfigRow[] {
   return SCANNERS.map((s) => ({
@@ -301,6 +333,7 @@ class Database {
   secret = '';
 
   private loaded = false;
+  private unlockedAllAt: number | null = null;
 
   load(): void {
     if (this.loaded) return;
@@ -321,7 +354,64 @@ class Database {
     this.riskItems = new Map((data.riskItems ?? []).map((r) => [r.id, r]));
     this.auditLogs = data.auditLogs ?? [];
     this.secret = data.secret || randomBytes(32).toString('hex');
+    this.unlockedAllAt = data.unlockedAllAt ?? null;
+
+    /* §2.2  Upgrade-in-place: any snapshot written before the "one key unlocks
+       everything" change still carries per-scanner false flags. Promote every
+       user and every license to the full entitlement set exactly once, then
+       persist so the migration is durable. */
+    this.migrateUnlockAll();
+    this.migrateSystemConfig();
     this.persist();
+  }
+
+  /**
+   * §2.2  One-time promotion of every stored user/license to full access.
+   * Idempotent: re-running on an already-migrated snapshot is a no-op that
+   * skips the write (tracked by `unlockedAllAt` on the persisted shape).
+   */
+  private migrateUnlockAll(): void {
+    if (this.unlockedAllAt !== null) return;
+
+    let touched = false;
+    for (const u of this.users.values()) {
+      for (const k of ENTITLEMENT_KEYS) {
+        if (!u[k]) {
+          u[k] = true;
+          touched = true;
+        }
+      }
+      if (u.plan !== 'ULTRA_PRO') {
+        u.plan = 'ULTRA_PRO';
+        touched = true;
+      }
+    }
+    for (const l of this.licenses.values()) {
+      for (const k of GRANT_KEYS) {
+        if (!l[k]) {
+          l[k] = true;
+          touched = true;
+        }
+      }
+    }
+    if (touched) {
+      this.auditLogs.unshift({
+        id: randomUUID(),
+        adminUsername: 'system',
+        action: 'MIGRATE_UNLOCK_ALL',
+        targetId: null,
+        createdAt: Date.now(),
+      });
+    }
+    this.unlockedAllAt = Date.now();
+  }
+
+  /** §1.1  Drop fields retired by the legacy brand purge from stored config. */
+  private migrateSystemConfig(): void {
+    const legacy = this.systemConfig as unknown as Record<string, unknown>;
+    delete legacy.tutorialVideo1Url;
+    delete legacy.tutorialVideo2Url;
+    if (legacy.versionBadge === 'Lite v1.2.8') legacy.versionBadge = DEFAULT_SYSTEM_CONFIG.versionBadge;
   }
 
   /**
@@ -366,6 +456,7 @@ class Database {
         riskItems: [...this.riskItems.values()],
         auditLogs: this.auditLogs.slice(0, 500),
         secret: this.secret,
+        unlockedAllAt: this.unlockedAllAt,
       };
       this.assertSchemaInvariants();
       writeFileSync(DB_FILE, JSON.stringify(shape, null, 2));

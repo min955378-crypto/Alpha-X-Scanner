@@ -13,6 +13,7 @@ import {
 } from 'react';
 
 import { decodeFrame, type WireFrame } from '@/lib/wire';
+import { readSnapshot, writeSnapshot } from '@/lib/snapshot-cache';
 import {
   SCANNERS,
   type BootStatus,
@@ -62,8 +63,20 @@ export function MarketProvider({
   initialTimeframe?: Timeframe;
 }) {
   const { push } = useToast();
-  const [frame, setFrame] = useState<MarketFrame | null>(null);
-  const [status, setStatus] = useState<ConnectionStatus>('connecting');
+
+  /* §5.1  Paint the last known frame IMMEDIATELY — before the WebSocket even
+     opens — so the heatmap, Pro Table, Coin Finder and all five scanners are
+     populated on the first render instead of after a 30s cold start. */
+  const [frame, setFrame] = useState<MarketFrame | null>(() => {
+    const cached = readSnapshot();
+    if (!cached) return null;
+    try {
+      return decodeFrame(cached.frame);
+    } catch {
+      return null;
+    }
+  });
+  const [status, setStatus] = useState<ConnectionStatus>(() => (readSnapshot() ? 'cached' : 'connecting'));
   const [dataMode, setDataMode] = useState<DataMode>('SIMULATED');
   const [boot, setBoot] = useState<BootStatus | null>(null);
   const [countdown, setCountdown] = useState(60);
@@ -95,6 +108,8 @@ export function MarketProvider({
           setFrame(decoded);
           setDataMode(decoded.dataMode);
           setStatus('connected');
+          /* §5.1  Keep the hot snapshot warm for the next login. */
+          writeSnapshot(decoded.timeframe, msg.frame as unknown as WireFrame);
           deadlineRef.current = Date.now() + Math.max(5, decoded.nextUpdateSec) * 1000;
           setCountdown(Math.max(0, decoded.nextUpdateSec));
           for (const c of decoded.coins) livePrices.current.set(c.symbol, [c.price, c.changePct24h]);
@@ -127,6 +142,14 @@ export function MarketProvider({
     },
     [push],
   );
+
+  /* §5.1  Seed the live-price overlay from the hydrated snapshot so every tile
+     renders a real number on the first frame rather than waiting for a tick. */
+  useEffect(() => {
+    if (!frame) return;
+    for (const c of frame.coins) livePrices.current.set(c.symbol, [c.price, c.changePct24h]);
+    setTickVersion((v) => v + 1);
+  }, [frame]);
 
   /* ------------------------------ transport ----------------------------- */
 

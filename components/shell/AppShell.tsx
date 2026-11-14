@@ -12,6 +12,7 @@ import { TABS, TabBar, BottomNav } from './TabBar';
 import { TopBar } from './TopBar';
 import { LegalFooter } from './LegalFooter';
 import { DisclaimerModal } from './DisclaimerModal';
+import { LicenseRenewalModal } from './LicenseRenewalModal';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { useMarket } from '@/components/providers/MarketProvider';
 import { useSettings } from '@/components/providers/SettingsProvider';
@@ -171,6 +172,7 @@ export function AppShell({
 
       <BottomNav />
       {showDisclaimer ? <DisclaimerModal onAccept={acceptDisclaimer} /> : null}
+      <LicenseRenewalModal />
       </div>
     </div>
   );

@@ -11,7 +11,7 @@
  *   · §6.2  All six RSI zones resolve and every coin lands in exactly one
  *   · §3.3  RVOL(20) stays centred on 1.0
  */
-const BASE = process.env.SCALPPRO_URL ?? 'http://127.0.0.1:3000';
+const BASE = process.env.ALPHAX_URL ?? 'http://127.0.0.1:3000';
 const TIMEFRAMES = ['15M', '30M', '1H', '4H', '1D'] as const;
 const ZONES = ['GAINERS', 'V1', 'NEUTRAL', 'HIDDEN_BULL', 'OVERSOLD', 'EXTREME'];
 

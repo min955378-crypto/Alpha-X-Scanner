@@ -6,7 +6,9 @@ import { useRouter } from 'next/navigation';
 import { ZONES, zoneForRsi, type CoinSnapshot, type MarketFrame, type Timeframe, type ZoneId } from '@/lib/types';
 import { useSettings } from '@/components/providers/SettingsProvider';
 import { HeatmapHeader } from './HeatmapHeader';
+import { DENSITY } from '@/lib/constants';
 import { CoinTile, heatmapKeyNav } from './CoinTile';
+import { VirtualGrid } from '@/components/ui/VirtualGrid';
 
 /**
  * §6.3  Mode A — the six RSI Heatmap zones.
@@ -118,10 +120,17 @@ export function HeatmapView({
                 </h2>
                 <span className="mono-num text-[11px] text-text-muted">{coins.length} coins</span>
               </div>
-              <div className="flex flex-wrap justify-center gap-1.5">
-                {coins.map((coin) => (
+              {/* §5.3  Windowed virtualisation — only the rows intersecting the
+                  viewport are mounted, so a 300-coin zone costs ~30 tiles. */}
+              <VirtualGrid
+                items={coins}
+                keyOf={(c) => c.symbol}
+                tileWidth={DENSITY[settings.density].tileW}
+                tileHeight={DENSITY[settings.density].tileH}
+                gap={6}
+                remeasureKey={`${settings.density}-${zone.id}-${coins.length}`}
+                renderItem={(coin) => (
                   <CoinTile
-                    key={coin.symbol}
                     coin={coin}
                     zone={zone}
                     timeframe={timeframe}
@@ -129,8 +138,8 @@ export function HeatmapView({
                     onOpen={openCoin}
                     highlighted={spotlightSymbol === coin.symbol}
                   />
-                ))}
-              </div>
+                )}
+              />
             </section>
           );
         })}

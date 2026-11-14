@@ -1,8 +1,8 @@
-import { BRAND, LEGAL_EN, LEGAL_UR } from '@/lib/constants';
+import { BRAND, LEGAL_EN } from '@/lib/constants';
 
 /**
- * §1.2  Mandatory legal & non-affiliation disclaimers.
- * Both the English and Urdu versions render verbatim on every page footer.
+ * §1.2  Mandatory legal & non-affiliation disclaimer — English only.
+ * The legacy Urdu paragraph was retired with the brand purge (§1.1).
  */
 export function LegalFooter({ compact = false }: { compact?: boolean }) {
   return (
@@ -26,10 +26,6 @@ export function LegalFooter({ compact = false }: { compact?: boolean }) {
         ) : null}
 
         <p className="mx-auto max-w-4xl text-[10px] leading-relaxed text-text-muted">{LEGAL_EN}</p>
-
-        <p dir="rtl" lang="ur" className="ur mx-auto max-w-3xl text-[11px] text-text-muted">
-          {LEGAL_UR}
-        </p>
 
         {!compact ? (
           <p className="text-[9.5px] text-text-muted/80">

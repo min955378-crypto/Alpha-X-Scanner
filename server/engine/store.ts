@@ -339,6 +339,48 @@ export class MarketStore {
     }
   }
 
+  /**
+   * §4.4  Raw candle history for one symbol/timeframe.
+   *
+   * Returns a defensive copy — callers (the klines API, the native chart) must
+   * never be able to mutate the engine's working series.
+   */
+  candles(symbol: string, tf: Timeframe): Candle[] | null {
+    const st = this.symbols.get(symbol) ?? this.symbols.get(`${symbol}USDT`);
+    const tfs = st?.tf[tf];
+    if (!tfs || !tfs.candles.length) return null;
+    return tfs.candles.map((c) => ({ ...c }));
+  }
+
+  /**
+   * §4.2  Apply a live `!miniTicker@arr` row.
+   *
+   * In LIVE mode this — not the simulator — is what moves the price. It costs
+   * zero REST weight and pushes every symbol once per second. The forming
+   * candle on every timeframe is updated so RSI / EMA / ATR / RVOL stay
+   * intrabar-accurate between the 60-second recompute cycles.
+   */
+  applyMiniTicker(symbol: string, last: number, quoteVol: number | null): void {
+    const st = this.symbols.get(symbol);
+    if (!st || !st.tf['1H']) return;
+    if (!Number.isFinite(last) || last <= 0) return;
+
+    st.pricePrevTick = st.price;
+    st.price = last;
+    if (quoteVol !== null && Number.isFinite(quoteVol) && quoteVol > 0) st.quoteVol24h = quoteVol;
+
+    for (const tf of Object.keys(st.tf) as Timeframe[]) {
+      const tfs = st.tf[tf];
+      const forming = tfs.candles[tfs.candles.length - 1];
+      if (!forming) continue;
+      if (last > forming.h) forming.h = last;
+      if (last < forming.l) forming.l = last;
+      forming.c = last;
+    }
+
+    this.recomputeQuote(st);
+  }
+
   /** Roll candles that have reached their interval boundary. */
   rollCandles(now: number): number {
     let closed = 0;
