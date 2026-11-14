@@ -2,7 +2,7 @@
   "name": "alpha-x-scanner",
   "version": "2.0.0",
   "private": true,
-  "description": "Alpha X Scanner — Smart Binance Coin Finder, RSI Heatmap & Multi-Scanner Terminal",
+  "description": "Alpha X Scanner \u2014 Smart Binance Coin Finder, RSI Heatmap & Multi-Scanner Terminal",
   "scripts": {
     "dev": "tsx server/index.ts",
     "build": "next build",
@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "qa:contrast": "node scripts/contrast.mjs",
     "qa:sim": "tsx scripts/tune-sim.ts",
-    "qa:frame": "tsx scripts/qa-frame.ts"
+    "qa:frame": "tsx scripts/qa-frame.ts",
+    "qa:disclaimer": "tsx scripts/qa-disclaimer.ts"
   },
   "dependencies": {
     "next": "^14.2.35",

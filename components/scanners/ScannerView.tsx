@@ -8,6 +8,7 @@ import { type ScannerMeta, type ScannerSignal, type SignalDirection, type Signal
 import { useMarket } from '@/components/providers/MarketProvider';
 import { useSettings } from '@/components/providers/SettingsProvider';
 import { useAuth } from '@/components/providers/AuthProvider';
+import { BRAND } from '@/lib/constants';
 import { CopyableValue, Pill, ScoreMeter, Toggle } from '@/components/ui';
 import { Icon } from '@/components/ui/Icons';
 import { TiltCard } from '@/components/ui/Motion3D';
@@ -436,16 +437,16 @@ function LockedScanner({ meta }: { meta: ScannerMeta }) {
       </div>
       <h2 className="mt-2 text-[15px] font-bold text-white">{meta.name} is locked</h2>
       <p className="mx-auto mt-1.5 max-w-sm text-[11.5px] leading-relaxed text-text-secondary">
-        Your license does not include this scanner. Message Freedom With Aahad on WhatsApp to activate Ultra Pro and
+        Your license does not include this scanner. Message Muhammad Ibrahim on WhatsApp to activate Ultra Pro and
         unlock all five scanners.
       </p>
       <a
-        href="https://wa.me/923164404787"
+        href={BRAND.whatsappHref}
         target="_blank"
         rel="noopener noreferrer"
         className="mono-num mt-3 inline-flex select-all items-center gap-1.5 rounded-full border border-emerald-500/50 bg-emerald-500/15 px-3 py-1 text-[11.5px] font-semibold text-emerald-400"
       >
-        +923164404787
+        {BRAND.whatsappContact}
       </a>
       <div className="mt-3">
         <Link href="/dashboard" className="btn-ghost">
