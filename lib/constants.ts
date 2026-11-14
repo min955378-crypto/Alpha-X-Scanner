@@ -15,16 +15,13 @@ export const BRAND = {
   whatsappContact: '0348-5581969',
   /** §1.3  Single canonical WhatsApp deep link — pre-filled purchase request. */
   whatsappHref:
-    'https://wa.me/923485581969?text=Assalam-o-Alaikum%20Muhammad%20Ibrahim!%20I%20visited%20Alpha%20X%20Scanner%20and%20want%20to%20purchase%20a%20License%20Key%20for%20Ultra%20Pro%20access.%20Please%20share%20the%20details.',
-  defaultVersionBadge: 'Lite v1.2.8',
+    'https://wa.me/923485581969?text=Assalam-o-Alaikum%20Muhammad%20Ibrahim!%20I%20visited%20Alpha%20X%20Scanner%20and%20want%20to%20purchase%20a%20License%20Key%20for%20Alpha%20X%20Pro%20access.%20Please%20share%20the%20details.',
+  defaultVersionBadge: 'v2.5 Pro',
 } as const;
 
 /** §1.2  Verbatim legal disclosures — rendered on every page footer. */
 export const LEGAL_EN =
   'Alpha X Scanner is an independent educational tool created by Muhammad Ibrahim. Educational purpose only — this is not financial advice. Crypto trading carries a substantial risk of loss, and no scanner, indicator, or signal guarantees a profit. Monitoring Tag is a risk warning, not confirmation of delisting. Always open the official Binance notice before making a decision.';
-
-export const LEGAL_UR =
-  'یہ ٹول صرف تعلیمی مقصد کے لیے ہے، یہ مالی مشورہ نہیں ہے۔ کرپٹو ٹریڈنگ میں نقصان کا خطرہ ہے۔ کسی بھی سگنل یا اسکینر سے منافع کی ضمانت نہیں۔ Alpha X Scanner ایک خودمختار ٹول ہے۔';
 
 /** §3.2  The 12 platform capabilities shown on the login gate — verbatim copy. */
 export interface LoginFeature {
@@ -110,58 +107,6 @@ export const LOGIN_FEATURES: LoginFeature[] = [
   },
 ];
 
-/** §1.1 / §11.1  Official Alpha X Scanner tutorial videos — [LIVE-VERIFIED]. */
-export const TUTORIALS = [
-  {
-    id: 'AOtweJ-XWbk',
-    title: 'How to Login & Open Alpha X Scanner in Just 2 Clicks Easy Guide',
-    duration: '5:01',
-    lesson: 'Login & Setup Guide',
-    summary:
-      'Two-click access walkthrough: enter Username, Password and License Key, then land straight on the live dashboard.',
-    summaryUr: 'دو کلک میں لاگ ان: یوزر نیم، پاسورڈ اور لائسنس کی درج کریں اور لائیو ڈیش بورڈ پر پہنچیں۔',
-  },
-  {
-    id: 'pz9-8XH6irE',
-    title: 'Alpha X Scanner Website Overview | Crypto Coin Finder & Scanners Explained in Urdu',
-    duration: '11:38',
-    lesson: 'Lesson 1 — Website Overview',
-    summary:
-      'Full terminal tour: the 6-zone RSI Heatmap, the 5 scanners, the Pro Table, Coin Finder and the Binance Risk Watch safety centre.',
-    summaryUr: 'مکمل ٹور: 6 زون RSI ہیٹ میپ، 5 اسکینرز، پرو ٹیبل، کوائن فائنڈر اور بائننس رسک واچ۔',
-  },
-  {
-    id: 'W8LMwkfrj-Q',
-    title: 'Alpha X Scanner Scanner Tutorial | V1, Order Block & EMA Scanners Kaise Use Karein?',
-    duration: '6:19',
-    lesson: 'Lesson 2 — Scanners Walkthrough',
-    summary:
-      'How to Start, Stop and Reset each scanner, read the Potential / Waiting / BUY pipeline and copy trade levels.',
-    summaryUr: 'ہر اسکینر کو اسٹارٹ، اسٹاپ اور ری سیٹ کرنا، اور پوٹینشل / ویٹنگ / BUY اسٹیج پڑھنا۔',
-  },
-  {
-    id: 'prQuRAIMJME',
-    title: 'Order Block Strategy Explained in Urdu | Alpha X Scanner Se Coins Find Aur Chart Analysis',
-    duration: '5:09',
-    lesson: 'Lesson 3 — Order Block Strategy',
-    summary:
-      'Finding unmitigated demand and supply order blocks, BOS + FVG validation, and entering on the rejection wick.',
-    summaryUr: 'غیر استعمال شدہ ڈیمانڈ اور سپلائی آرڈر بلاکس، BOS اور FVG کی تصدیق، اور ریجیکشن وِک پر انٹری۔',
-  },
-  {
-    id: 'bX-zxQmfW3U',
-    title: 'EMA Crossover Strategy Explained in Urdu | Alpha X Scanner Scanner Se Chart Analysis Tak',
-    duration: '19:17',
-    lesson: 'Lesson 4 — EMA Crossover Strategy',
-    summary:
-      'EMA 9/21/50 stacking, fresh crossovers, pullback re-entries and how the scanner scores confluence out of 100.',
-    summaryUr: 'EMA 9/21/50 اسٹیک، کراس اوور، پل بیک ری انٹری اور 100 میں سے اسکور کا طریقہ۔',
-  },
-] as const;
-
-/** The two videos linked directly on /login (spec §4.2). */
-export const LOGIN_VIDEOS = [TUTORIALS[1], TUTORIALS[0]] as const;
-
 /**
  * §4.2  12-slide login carousel.
  * Slide 1 is [LIVE-VERIFIED]; slides 2-12 are [PROPOSED] and live in
@@ -193,8 +138,6 @@ export const DEFAULT_SYSTEM_CONFIG: SystemConfig = {
   promoHeadline: BRAND.promoHeadline,
   promoTagline: BRAND.promoTagline,
   whatsappContact: BRAND.whatsappContact,
-  tutorialVideo1Url: `https://www.youtube.com/watch?v=${TUTORIALS[1].id}`,
-  tutorialVideo2Url: `https://www.youtube.com/watch?v=${TUTORIALS[0].id}`,
   loginCarouselJson: LOGIN_CAROUSEL,
 };
 
@@ -223,19 +166,26 @@ export function tradingViewUrl(baseAsset: string, timeframe: Timeframe, interval
   return `https://www.tradingview.com/chart/?symbol=BINANCE:${baseAsset}USDT&interval=${intervalMap[timeframe]}`;
 }
 
-/** §11.1  Bilingual trading glossary (EN + اردو). */
-export const GLOSSARY: Array<{ term: string; en: string; ur: string }> = [
-  { term: 'RSI Heatmap', en: 'A colour-coded grid of every coin’s 14-period RSI, refreshed every 60 seconds.', ur: 'ہر کوائن کے RSI (14) کا رنگین گرڈ جو ہر 60 سیکنڈ میں ریفریش ہوتا ہے۔' },
-  { term: 'V1 Zone (50-60)', en: 'The RSI 50–60 band where momentum continuation (V1 scaling) setups are hunted.', ur: 'RSI 50–60 کی وہ رینج جہاں مومینٹم کنٹینیوایشن سیٹ اپ تلاش کیے جاتے ہیں۔' },
-  { term: 'RSI 52-55 Rising', en: 'The sweet spot: RSI rising inside 52–55 with positive 24h change. Spotlighted live.', ur: 'وہ مخصوص جگہ: RSI 52–55 کے درمیان اوپر جا رہا ہو اور 24 گھنٹے کی تبدیلی مثبت ہو۔' },
-  { term: 'Hidden Bullish Divergence', en: 'Price prints a higher low while RSI prints a lower low — a continuation signal in RSI 30–40.', ur: 'قیمت نے ہائر لو بنایا مگر RSI نے لوئر لو — RSI 30–40 میں کنٹینیوایشن کا اشارہ۔' },
-  { term: 'Order Block (Demand/Supply)', en: 'The last opposing candle before an impulsive move; institutions defend it on the retest.', ur: 'تیز موو سے پہلے والی آخری الٹی کینڈل؛ ادارے دوبارہ ٹیسٹ پر اس کا دفاع کرتے ہیں۔' },
-  { term: 'Mitigation', en: 'Price returning into an order block and consuming the resting orders inside it.', ur: 'قیمت کا دوبارہ آرڈر بلاک میں آنا اور وہاں موجود آرڈرز کا استعمال ہو جانا۔' },
-  { term: 'Break of Structure (BOS)', en: 'A candle closing beyond a prior swing high/low, confirming displacement.', ur: 'کینڈل کا پچھلے سوئنگ ہائی/لو سے آگے بند ہونا، جو ڈسپلیسمنٹ کی تصدیق ہے۔' },
-  { term: 'Fair Value Gap (FVG)', en: 'A 3-candle imbalance left by displacement; price tends to rebalance into it.', ur: 'تیز موو سے بننے والا 3 کینڈل کا خلا؛ قیمت عموماً اسے بھرنے آتی ہے۔' },
-  { term: 'RVOL(20)', en: 'Relative volume: current bar volume (time-normalised) divided by the 20-bar average.', ur: 'ریلیٹیو والیوم: موجودہ کینڈل کا والیوم تقسیم 20 کینڈل کے اوسط والیوم پر۔' },
-  { term: 'Alpha Sniper', en: 'EMA(RSI(14), 3) plotted in a 30–70 purple channel; crosses of 30/50/70 are the triggers.', ur: 'EMA(RSI(14), 3) جو 30–70 جامنی چینل میں پلاٹ ہوتا ہے؛ 30/50/70 کے کراس ٹرگر ہیں۔' },
-  { term: 'Monitoring Tag (⚠)', en: 'A Binance risk warning on higher-volatility assets. It is NOT a delisting confirmation.', ur: 'بائننس کی طرف سے زیادہ اتار چڑھاؤ والے اثاثوں پر خطرے کا نشان۔ یہ ڈی لسٹنگ کی تصدیق نہیں ہے۔' },
+/**
+ * §6.2  Institutional Trading Glossary — searchable, English only.
+ * The Urdu column was retired with the legacy brand purge (§1.1).
+ */
+export const GLOSSARY: Array<{ term: string; en: string }> = [
+  { term: 'RSI Heatmap', en: 'A colour-coded grid of every coin\u2019s 14-period RSI, refreshed every 60 seconds.' },
+  { term: 'V1 Zone (50-60)', en: 'The RSI 50\u201360 band where momentum continuation (V1 scaling) setups are hunted.' },
+  { term: 'RSI 52-55 Rising', en: 'The sweet spot: RSI rising inside 52\u201355 with positive 24h change. Spotlighted live.' },
+  { term: 'Hidden Bullish Divergence', en: 'Price prints a higher low while RSI prints a lower low \u2014 a continuation signal in RSI 30\u201340.' },
+  { term: 'Order Block (Demand/Supply)', en: 'The last opposing candle before an impulsive move; institutions defend it on the retest.' },
+  { term: 'Mitigation', en: 'Price returning into an order block and consuming the resting orders inside it.' },
+  { term: 'Break of Structure (BOS)', en: 'A candle closing beyond a prior swing high/low, confirming displacement.' },
+  { term: 'Fair Value Gap (FVG)', en: 'A 3-candle imbalance left by displacement; price tends to rebalance into it.' },
+  { term: 'RVOL(20)', en: 'Relative volume: current bar volume (time-normalised) divided by the 20-bar average.' },
+  { term: 'Alpha Sniper', en: 'EMA(RSI(14), 3) plotted in a 30\u201370 purple channel; crosses of 30/50/70 are the triggers.' },
+  { term: 'Monitoring Tag (\u26a0)', en: 'A Binance risk warning on higher-volatility assets. It is NOT a delisting confirmation.' },
+  { term: 'EMA Ribbon (9/21/50)', en: 'Three stacked exponential moving averages; compression then expansion marks trend ignition.' },
+  { term: 'Liquidity Sweep', en: 'A fast move through a swing low/high that grabs resting stops before reversing.' },
+  { term: 'Risk\u2013Reward (R:R)', en: 'Distance to TP1 divided by distance to the stop. Alpha X targets a minimum of 1.5R.' },
+  { term: 'Win Rate (500)', en: 'Rolling backtest accuracy of a setup across the last 500 candles on the active timeframe.' },
 ];
 
 /** §3.2  Density scale. */

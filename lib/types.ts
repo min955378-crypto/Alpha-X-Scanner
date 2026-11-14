@@ -488,8 +488,6 @@ export interface SystemConfig {
   promoHeadline: string;
   promoTagline: string;
   whatsappContact: string;
-  tutorialVideo1Url: string;
-  tutorialVideo2Url: string;
   loginCarouselJson: CarouselSlide[] | null;
 }
 
@@ -557,6 +555,8 @@ export interface SystemHealth {
   binanceWeightCap: number;
   wsPool: { streams: number; connections: number; subscriptions: Record<string, number> };
   dataMode: DataMode;
+  /** §4.3  Which upstream actually served the last successful call. */
+  provider: 'binance' | 'bybit' | 'coincap' | 'NONE';
   uptimeSec: number;
   scanCycle: number;
   heapUsedMb: number;

@@ -12,9 +12,11 @@
     "qa:contrast": "node scripts/contrast.mjs",
     "qa:sim": "tsx scripts/tune-sim.ts",
     "qa:frame": "tsx scripts/qa-frame.ts",
-    "qa:disclaimer": "tsx scripts/qa-disclaimer.ts"
+    "qa:disclaimer": "tsx scripts/qa-disclaimer.ts",
+    "qa:providers": "tsx scripts/qa-providers.ts"
   },
   "dependencies": {
+    "lightweight-charts": "^4.2.3",
     "next": "^14.2.35",
     "react": "18.3.1",
     "react-dom": "18.3.1",

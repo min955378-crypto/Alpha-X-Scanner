@@ -7,6 +7,7 @@ import { formatPct, tradingViewLink } from '@/lib/format';
 import { SCANNERS, TIMEFRAMES, type MarketFrame, type Timeframe } from '@/lib/types';
 import { useSettings } from '@/components/providers/SettingsProvider';
 import { useMarket } from '@/components/providers/MarketProvider';
+import { TiltCard } from '@/components/ui/Motion3D';
 import { Icon } from '@/components/ui/Icons';
 
 /**
@@ -101,8 +102,8 @@ export function RightSidebar({ frame }: { frame: MarketFrame | null }) {
         {saved ? <div className="text-center text-[10px] font-semibold text-emerald-400">Saved ✓</div> : null}
       </div>
 
-      {/* Muhammad Ibrahim promo card */}
-      <div className="card space-y-2 p-3 text-center">
+      {/* Muhammad Ibrahim promo card — §7.4 3D tilt + conic laser border. */}
+      <TiltCard max={7} className="card laser-border space-y-2 p-3 text-center" style={{ ['--laser-color' as string]: '#00d26a' }}>
         <Equalizer />
         <div className="text-[12px] font-bold text-white">{BRAND.promoHeadline}</div>
         <p className="text-[10.5px] leading-relaxed text-text-secondary">{BRAND.promoTagline}</p>
@@ -116,7 +117,7 @@ export function RightSidebar({ frame }: { frame: MarketFrame | null }) {
           <span className="h-2 w-2 rounded-full bg-emerald-400" />
           {BRAND.whatsappContact}
         </a>
-      </div>
+      </TiltCard>
 
       {/* Live price sample — proves the 1 Hz tick overlay is wired up. */}
       <div className="card p-2.5" key={tickVersion}>

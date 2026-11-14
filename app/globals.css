@@ -58,7 +58,6 @@
   --font-display: 'Space Grotesk', 'Plus Jakarta Sans', 'Inter', sans-serif;
   --font-ui: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-num: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  --font-ur: 'Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', 'Inter', sans-serif;
 }
 
 @layer base {
@@ -126,11 +125,6 @@
     font-feature-settings: 'tnum' 1, 'zero' 1;
   }
 
-  .ur {
-    font-family: var(--font-ur);
-    direction: rtl;
-    line-height: 1.95;
-  }
 
   .card {
     @apply rounded-xl border border-white/[0.06] bg-[#0e111a];

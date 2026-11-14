@@ -1,5 +1,14 @@
 import { SCANNERS, type BootStatus, type MarketFrame, type ScannerSlug, type ScannerSignal, type ServerMessage, type SystemHealth, type Timeframe } from '@/lib/types';
-import { WEIGHT_CAP_PER_MIN, WeightMeter, fetchUniverse, klinesWeight, probe } from './binance';
+import {
+  MiniTickerStream,
+  WEIGHT_CAP_PER_MIN,
+  WeightMeter,
+  activeProviderId,
+  fetchUniverse,
+  klinesWeight,
+  probe,
+  type MiniTickerRow,
+} from './binance';
 import { getDb } from './db';
 import { listRiskItems, refreshRiskWatch, seedSnapshot } from './riskwatch';
 import { runScanner } from './scanners';
@@ -24,9 +33,9 @@ export interface EngineListener {
 const TICK_MS = 1000;
 const CYCLE_MS = 60_000;
 /** §2.2  Phase A: 20 req/s × weight 1 → 612 coins in 30.6s. */
-const PHASE_A_RPS = Number(process.env.SCALPPRO_PHASE_A_RPS ?? 20);
+const PHASE_A_RPS = Number(process.env.ALPHAX_PHASE_A_RPS ?? 20);
 /** §2.2  Phase B: 3.5 req/s × weight 5 → 1,050 weight/min, ~2.9 min. */
-const PHASE_B_RPS = Number(process.env.SCALPPRO_PHASE_B_RPS ?? 3.5);
+const PHASE_B_RPS = Number(process.env.ALPHAX_PHASE_B_RPS ?? 3.5);
 const RISK_REFRESH_MS = 60 * 60 * 1000;
 
 class Engine {
@@ -69,6 +78,8 @@ class Engine {
   private starting: Promise<void> | null = null;
   private seedQueue: string[] = [];
   private backfillQueue: string[] = [];
+  /** §4.2  1 Hz `!miniTicker@arr` stream — zero REST weight. */
+  private miniTicker: MiniTickerStream | null = null;
 
   /* ------------------------------ lifecycle ------------------------------ */
 
@@ -135,6 +146,14 @@ class Engine {
     }, Math.max(5, Math.round(1000 / PHASE_A_RPS)));
 
     /* Ticks + cycles run from the very first second. */
+    /* §4.2  In LIVE mode the 1 Hz price feed comes off the combined
+       miniTicker socket instead of REST polling. */
+    if (this.dataMode === 'LIVE' && typeof WebSocket !== 'undefined') {
+      this.miniTicker = new MiniTickerStream((rows) => this.onMiniTicker(rows));
+      this.miniTicker.start();
+      console.log('[engine] !miniTicker@arr stream attached (0 REST weight)');
+    }
+
     this.tickTimer = setInterval(() => this.onTick(), TICK_MS);
     this.cycleTimer = setInterval(() => this.onCycle(), CYCLE_MS);
     setInterval(() => void this.refreshRisk(), RISK_REFRESH_MS).unref?.();
@@ -183,6 +202,20 @@ class Engine {
 
     this.boot.elapsedSec = Math.round((now - this.startedAt) / 1000);
     this.boot.weightUsedMin = this.meter.reported();
+  }
+
+  /**
+   * §4.2  One `!miniTicker@arr` frame carries every symbol. We only touch the
+   * store here — the 1 Hz `onTick` broadcast picks the diff up on its next
+   * pass, so a burst of rows cannot cause a burst of renders.
+   */
+  private onMiniTicker(rows: MiniTickerRow[]): void {
+    for (const r of rows) {
+      if (!r.s) continue;
+      const last = Number(r.c);
+      const qv = r.q === undefined ? null : Number(r.q);
+      if (Number.isFinite(last) && last > 0) this.store.applyMiniTicker(r.s, last, qv);
+    }
   }
 
   /* -------------------------------- cycle -------------------------------- */
@@ -313,6 +346,7 @@ class Engine {
       phaseBReady: this.boot.phaseBReady,
       binanceWeightUsed: this.meter.reported(),
       binanceWeightCap: WEIGHT_CAP_PER_MIN,
+      provider: activeProviderId(),
       wsPool: {
         streams: this.requestedTimeframes.size * this.store.symbols.size + 1,
         connections: 2,

@@ -1,16 +1,37 @@
 'use client';
 
 import { useParams, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 
+import { BRAND } from '@/lib/constants';
 import { formatPct, formatPrice, formatRsi, formatRvol, tradingViewLink } from '@/lib/format';
+import type { Candle } from '@/lib/indicators';
 import { TF_TO_TV, TIMEFRAMES, zoneForRsi, type Timeframe } from '@/lib/types';
 import { AppShell } from '@/components/shell/AppShell';
 import { CopyButton, Pill, Segmented } from '@/components/ui';
+import { Icon } from '@/components/ui/Icons';
+import { SniperChart } from '@/components/chart/SniperChart';
+import { TradingViewAdvanced } from '@/components/chart/TradingViewAdvanced';
 import { useMarket } from '@/components/providers/MarketProvider';
 import { useSettings } from '@/components/providers/SettingsProvider';
 
-/** §9  Internal chart hand-off + the two compile-safe Pine v5 scripts. */
+/**
+ * §4.4  DUAL LIVE CHARTING ENGINE.
+ *
+ *   Mode A — Alpha X Native Sniper Chart (TradingView Lightweight Charts,
+ *            HTML5 canvas): live candles + EMA 13/34 + order-block zones +
+ *            500-candle backtest HUD + synchronised Alpha Sniper oscillator.
+ *   Mode B — TradingView Advanced Real-Time Widget (s3.tradingview.com/tv.js)
+ *            bound to BINANCE:<symbol> in the user's timeframe, dark theme.
+ *
+ * Plus the 1-click [Open in TradingView ↗] deep link.
+ *
+ * The chosen mode persists to the account (`chartMode`) so every chart and the
+ * quick-chart drawer open the way the trader left them.
+ */
+
+type ChartMode = 'INTERNAL' | 'EXTERNAL_TV';
+
 export default function ChartPage() {
   return (
     <Suspense fallback={null}>
@@ -26,8 +47,48 @@ function ChartInner() {
   const { settings, update } = useSettings();
 
   const base = (params.symbol ?? 'BTC').toUpperCase();
+  const symbol = `${base}USDT`;
+
   const [tf, setTf] = useState<Timeframe>((search.get('tf') as Timeframe) ?? settings.timeframe);
+  const [mode, setMode] = useState<ChartMode>(settings.chartMode === 'EXTERNAL_TV' ? 'EXTERNAL_TV' : 'INTERNAL');
+  const [candles, setCandles] = useState<Candle[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [scripts, setScripts] = useState<{ overlay: string; sniper: string } | null>(null);
+
+  /* Mode A needs real candle history — served from the warm engine snapshot. */
+  useEffect(() => {
+    if (mode !== 'INTERNAL') return;
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+
+    fetch(`/api/market/klines?symbol=${symbol}&tf=${tf}&limit=500`)
+      .then((r) => r.json())
+      .then((j: { ok: boolean; candles?: Candle[]; error?: string }) => {
+        if (cancelled) return;
+        if (j.ok && Array.isArray(j.candles)) setCandles(j.candles);
+        else setLoadError(j.error ?? 'NO_DATA');
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError('NETWORK');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, symbol, tf]);
+
+  const persistMode = useCallback(
+    (next: ChartMode) => {
+      setMode(next);
+      void update('chartMode', next);
+    },
+    [update],
+  );
 
   useEffect(() => {
     Promise.all([
@@ -38,6 +99,7 @@ function ChartInner() {
 
   const coin = frame?.coins.find((c) => c.baseAsset === base || c.symbol === base);
   const zone = coin ? zoneForRsi(coin.rsi) : null;
+  const tvInterval = TF_TO_TV[tf];
 
   return (
     <AppShell>
@@ -57,7 +119,7 @@ function ChartInner() {
                   </span>
                 ) : null}
                 {coin && zone ? (
-                  <Pill tone="gray" className="border-white/20" >
+                  <Pill tone="gray" className="border-white/20">
                     RSI {formatRsi(coin.rsi)} · {zone.filterLabel}
                   </Pill>
                 ) : null}
@@ -74,12 +136,24 @@ function ChartInner() {
               }}
               options={TIMEFRAMES.map((t) => ({ value: t, label: t }))}
             />
-            <a
-              href={tradingViewLink(base, tf)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn-green whitespace-nowrap"
-            >
+
+            {/* §4.4  Mode A / Mode B toggle */}
+            <div className="flex overflow-hidden rounded-lg border border-white/10">
+              <ModeButton
+                active={mode === 'INTERNAL'}
+                onClick={() => persistMode('INTERNAL')}
+                icon="candles"
+                label="Alpha X Native"
+              />
+              <ModeButton
+                active={mode === 'EXTERNAL_TV'}
+                onClick={() => persistMode('EXTERNAL_TV')}
+                icon="chart"
+                label="TradingView"
+              />
+            </div>
+
+            <a href={tradingViewLink(base, tf)} target="_blank" rel="noopener noreferrer" className="btn-green whitespace-nowrap">
               Open in TradingView ↗
             </a>
             <a
@@ -109,26 +183,52 @@ function ChartInner() {
           </section>
         ) : null}
 
-        {/* Embedded TradingView widget */}
+        {/* Chart surface */}
         <section className="card overflow-hidden">
           <div className="flex items-center justify-between border-b border-white/[0.06] px-3 py-2">
             <h2 className="text-[13px] font-bold text-white">
-              BINANCE:{base}USDT · {tf} <span className="mono-num text-[10px] text-text-muted">interval={TF_TO_TV[tf]}</span>
+              BINANCE:{base}USDT · {tf}{' '}
+              <span className="mono-num text-[10px] text-text-muted">
+                interval={tvInterval} · {mode === 'INTERNAL' ? 'Mode A · Native Sniper' : 'Mode B · TradingView'}
+              </span>
             </h2>
             <CopyButton value={`BINANCE:${base}USDT`} label="symbol" />
           </div>
-          <div className="h-[520px] w-full bg-black">
-            <iframe
-              key={`${base}-${tf}`}
-              src={`https://s.tradingview.com/widgetembed/?symbol=BINANCE%3A${base}USDT&interval=${TF_TO_TV[tf]}&theme=dark&style=1&hide_side_toolbar=0&allow_symbol_change=0&saveimage=1&studies=%5B%5D&backgroundColor=%230E111A&gridColor=%23243049`}
-              title={`${base}USDT ${tf} chart`}
-              className="h-full w-full border-0"
-              loading="lazy"
-            />
+
+          <div className="bg-black/40">
+            {mode === 'INTERNAL' ? (
+              loading && !candles.length ? (
+                <div className="grid h-[620px] place-items-center text-[11px] text-text-muted">
+                  Loading 500 candles for {symbol}…
+                </div>
+              ) : loadError && !candles.length ? (
+                <div className="grid h-[620px] place-items-center px-6 text-center text-[11px] text-text-muted">
+                  <div>
+                    <p>
+                      Candle history for {symbol} is not available yet ({loadError}).
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => persistMode('EXTERNAL_TV')}
+                      className="btn-ghost mt-2"
+                    >
+                      Switch to TradingView ↗
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <SniperChart candles={candles} symbol={symbol} height={460} />
+              )
+            ) : (
+              <TradingViewAdvanced symbol={symbol} interval={tvInterval} height={620} />
+            )}
           </div>
+
           <p className="border-t border-white/[0.06] px-3 py-1.5 text-[10px] text-text-muted">
-            Charts are served by TradingView. Alpha X Scanner is an independent educational tool and is not affiliated with
-            TradingView or Binance.
+            {mode === 'INTERNAL'
+              ? 'Rendered locally by Alpha X Scanner from live Binance klines. Candlestick colours are fixed: bullish emerald, bearish crimson.'
+              : 'Charts are served by TradingView. '}
+            {BRAND.productName} is an independent educational tool and is not affiliated with TradingView or Binance.
           </p>
         </section>
 
@@ -149,6 +249,32 @@ function ChartInner() {
         </section>
       </main>
     </AppShell>
+  );
+}
+
+function ModeButton({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: 'candles' | 'chart';
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] font-semibold transition-colors ${
+        active ? 'bg-emerald-500/20 text-emerald-400' : 'text-text-secondary hover:bg-white/[0.05]'
+      }`}
+    >
+      <Icon name={icon === 'chart' ? 'trending' : icon} size={13} />
+      {label}
+    </button>
   );
 }
 

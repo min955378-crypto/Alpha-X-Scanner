@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
 import { BRAND } from '@/lib/constants';
+import { licenseStatus } from '@/lib/license';
 import { formatClock } from '@/lib/format';
 import { SCANNERS } from '@/lib/types';
 import { useAuth } from '@/components/providers/AuthProvider';
@@ -44,7 +45,9 @@ export function TopBar() {
   const dotTone =
     status === 'connected' ? 'bg-emerald-500' : status === 'offline' ? 'bg-red-500' : 'bg-amber-500';
 
-  const activeScanners = SCANNERS.filter((s) => user?.entitlements[s.entitlementKey]);
+  /* §2  One active license key unlocks 100% of the platform, so every scanner
+     reports Active. The only thing that can degrade is license status. */
+  const licence = licenseStatus(user, now?.getTime() ?? Date.now());
 
   return (
     <header className="sticky top-0 z-50 flex h-topbar items-center justify-between gap-2 border-b border-white/[0.06] bg-bg-topbar px-3">
@@ -82,29 +85,51 @@ export function TopBar() {
             aria-haspopup="true"
             className="rounded border border-emerald-500/55 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400 hover:bg-emerald-500/20"
           >
-            {user?.plan === 'ULTRA_PRO' ? 'Ultra Pro' : 'Lite'} ▾
+            Alpha X Pro ▾
           </button>
           <div className="absolute left-0 top-full z-50 hidden w-60 rounded-lg border border-white/10 bg-bg-card p-3 shadow-2xl group-hover:block group-focus-within:block">
             <div className="mb-2 border-b border-white/5 pb-1.5 text-[11px] font-bold text-white">Your access</div>
             <ul className="space-y-1.5 text-[11px]">
-              {SCANNERS.map((s) => {
-                const active = Boolean(user?.entitlements[s.entitlementKey]);
-                return (
-                  <li key={s.slug} className="flex items-center justify-between gap-2">
-                    <span className={active ? 'text-gray-200' : 'text-text-muted'}>{s.name}</span>
-                    {active ? (
-                      <span className="text-[10px] font-semibold text-emerald-400">Active</span>
-                    ) : (
-                      <span className="text-[10px] font-semibold text-text-muted">Locked</span>
-                    )}
-                  </li>
-                );
-              })}
+              {SCANNERS.map((s) => (
+                <li key={s.slug} className="flex items-center justify-between gap-2">
+                  <span className="text-gray-200">{s.name}</span>
+                  <span
+                    className="rounded-full border border-emerald-500/50 bg-emerald-500/15 px-1.5 py-px text-[9.5px] font-bold text-emerald-400"
+                    style={{ filter: 'drop-shadow(0 0 6px rgba(0, 210, 106, 0.45))' }}
+                  >
+                    Active
+                  </span>
+                </li>
+              ))}
             </ul>
-            <div className="mt-2.5 border-t border-white/5 pt-2 text-[10px] text-text-secondary">
-              {activeScanners.length === SCANNERS.length
-                ? 'All five scanners unlocked.'
-                : 'Contact Muhammad Ibrahim to activate Ultra Pro.'}
+            <div className="mt-2.5 space-y-1 border-t border-white/5 pt-2 text-[10px]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-text-muted">License</span>
+                <span
+                  className={`mono-num font-bold ${
+                    licence.state === 'EXPIRED' || licence.state === 'SUSPENDED'
+                      ? 'text-red-400'
+                      : licence.state === 'EXPIRING'
+                        ? 'text-amber-400'
+                        : 'text-emerald-400'
+                  }`}
+                >
+                  {licence.badge}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-text-muted">Validity</span>
+                <span className="mono-num font-semibold text-text-bright">{licence.remaining}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-text-muted">Key</span>
+                <span className="mono-num select-all font-semibold text-text-bright">
+                  {user?.licenseKey ?? '—'}
+                </span>
+              </div>
+              <p className="pt-0.5 text-[9.5px] leading-relaxed text-text-muted">
+                All five scanners unlocked by your active license key.
+              </p>
             </div>
             <a
               href={BRAND.whatsappHref}
@@ -112,7 +137,7 @@ export function TopBar() {
               rel="noopener noreferrer"
               className="mono-num mt-1.5 block select-all text-[10px] font-semibold text-emerald-400 hover:underline"
             >
-              {systemConfig.whatsappContact}
+              {licence.active ? 'Renew / extend' : 'Renew now'} · {systemConfig.whatsappContact}
             </a>
           </div>
         </div>

@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
 import { formatClock, formatRsi, formatRvol, levelCopyValue, tradingViewLink } from '@/lib/format';
@@ -8,7 +7,7 @@ import { type ScannerMeta, type ScannerSignal, type SignalDirection, type Signal
 import { useMarket } from '@/components/providers/MarketProvider';
 import { useSettings } from '@/components/providers/SettingsProvider';
 import { useAuth } from '@/components/providers/AuthProvider';
-import { BRAND } from '@/lib/constants';
+import { licenseStatus } from '@/lib/license';
 import { CopyableValue, Pill, ScoreMeter, Toggle } from '@/components/ui';
 import { Icon } from '@/components/ui/Icons';
 import { TiltCard } from '@/components/ui/Motion3D';
@@ -43,7 +42,11 @@ export function ScannerView({ meta }: { meta: ScannerMeta }) {
   const [scanning, setScanning] = useState(false);
   const audioRef = useRef<AudioContext | null>(null);
 
+  /* §2.1  A padlock screen never renders again — an active license key unlocks
+     every scanner. `licenceActive` only tracks license STATUS (expired /
+     revoked / suspended), which is the sole remaining gate. */
   const entitled = Boolean(user?.entitlements[meta.entitlementKey]);
+  const licenceActive = licenseStatus(user).active;
   const list = signals[meta.slug] ?? [];
 
   const filtered = useMemo(
@@ -57,7 +60,7 @@ export function ScannerView({ meta }: { meta: ScannerMeta }) {
      the WebAudio context — it never triggers per-user Binance calls. */
   const start = useCallback(() => {
     setRunning(true);
-    if (typeof window !== 'undefined') window.sessionStorage.setItem(`scalppro:scanner:${meta.slug}`, 'running');
+    if (typeof window !== 'undefined') window.sessionStorage.setItem(`alphax:v2:scanner:${meta.slug}`, 'running');
     if (settings.soundEnabled && typeof window !== 'undefined') {
       try {
         audioRef.current = audioRef.current ?? new AudioContext();
@@ -72,7 +75,7 @@ export function ScannerView({ meta }: { meta: ScannerMeta }) {
 
   const stop = useCallback(() => {
     setRunning(false);
-    if (typeof window !== 'undefined') window.sessionStorage.setItem(`scalppro:scanner:${meta.slug}`, 'idle');
+    if (typeof window !== 'undefined') window.sessionStorage.setItem(`alphax:v2:scanner:${meta.slug}`, 'idle');
     log(`■ ${meta.name} stopped`);
   }, [meta.name, meta.slug, log]);
 
@@ -83,8 +86,12 @@ export function ScannerView({ meta }: { meta: ScannerMeta }) {
   }, [meta.name, log]);
 
   const manualScan = useCallback(async () => {
-    if (!entitled) {
-      push({ title: 'Scanner locked', body: 'Contact admin on WhatsApp to activate Ultra Pro.', level: 'warn' });
+    if (!licenceActive) {
+      push({
+        title: 'License inactive',
+        body: 'Your license key has expired or been revoked. Renew to resume live scanning.',
+        level: 'warn',
+      });
       return;
     }
     setScanning(true);
@@ -116,10 +123,6 @@ export function ScannerView({ meta }: { meta: ScannerMeta }) {
     if (running) start();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  if (!entitled) {
-    return <LockedScanner meta={meta} />;
-  }
 
   return (
     <div className="grid gap-3 xl:grid-cols-[1fr_300px]">
@@ -427,34 +430,6 @@ function StageBadge({ stage, direction, label }: { stage: SignalStage; direction
     );
   }
   return <Pill tone={STAGE_TONE[stage]}>{label}</Pill>;
-}
-
-function LockedScanner({ meta }: { meta: ScannerMeta }) {
-  return (
-    <div className="card mx-auto max-w-lg p-6 text-center">
-      <div className="text-[24px]" aria-hidden="true">
-        🔒
-      </div>
-      <h2 className="mt-2 text-[15px] font-bold text-white">{meta.name} is locked</h2>
-      <p className="mx-auto mt-1.5 max-w-sm text-[11.5px] leading-relaxed text-text-secondary">
-        Your license does not include this scanner. Message Muhammad Ibrahim on WhatsApp to activate Ultra Pro and
-        unlock all five scanners.
-      </p>
-      <a
-        href={BRAND.whatsappHref}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="mono-num mt-3 inline-flex select-all items-center gap-1.5 rounded-full border border-emerald-500/50 bg-emerald-500/15 px-3 py-1 text-[11.5px] font-semibold text-emerald-400"
-      >
-        {BRAND.whatsappContact}
-      </a>
-      <div className="mt-3">
-        <Link href="/dashboard" className="btn-ghost">
-          ← Back to dashboard
-        </Link>
-      </div>
-    </div>
-  );
 }
 
 /** §7.1  WebAudio chime — engaged only after a user gesture (Start / Test). */

@@ -33,7 +33,6 @@ const config: Config = {
         display: ['Space Grotesk', 'Plus Jakarta Sans', 'Inter', 'sans-serif'],
         ui: ['Plus Jakarta Sans', 'Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
         num: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
-        ur: ['Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', 'Inter', 'sans-serif'],
       },
       fontSize: {
         '2xs': ['9.5px', '12px'],
