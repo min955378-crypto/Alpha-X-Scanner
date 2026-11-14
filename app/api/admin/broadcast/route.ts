@@ -4,6 +4,7 @@ import type { BroadcastLevel, BroadcastSeverity, BroadcastState } from '@/lib/ty
 import { getDb } from '@/server/engine/db';
 import { pushBroadcast } from '@/server/ws';
 import { isGuardError, requireAdmin } from '../_guard';
+import { flushAfter } from '../_flush';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,7 +24,7 @@ function levelFor(severity: BroadcastSeverity): BroadcastLevel {
  *           missing it.
  *   DELETE → clear the banner everywhere.
  */
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const guard = requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
   const { admin } = guard;
@@ -66,7 +67,7 @@ export async function POST(req: Request) {
 }
 
 /** Clearing is a real state change: drop the row and notify live sockets. */
-export async function DELETE(req: Request) {
+async function handleDelete(req: Request) {
   const guard = requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
   const { admin } = guard;
@@ -78,4 +79,15 @@ export async function DELETE(req: Request) {
 
   pushBroadcast('', '', 'INFO', 'info', Date.now());
   return NextResponse.json({ ok: true });
+}
+
+
+/* §3  Durability wrappers — see ../_flush.ts. */
+
+export async function POST(req: Request) {
+  return flushAfter(handlePost(req));
+}
+
+export async function DELETE(req: Request) {
+  return flushAfter(handleDelete(req));
 }

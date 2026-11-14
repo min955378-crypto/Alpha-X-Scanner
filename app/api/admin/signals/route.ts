@@ -4,6 +4,7 @@ import { SCANNER_BY_SLUG, TIMEFRAMES, type ScannerSlug, type SignalDirection, ty
 import { getDb } from '@/server/engine/db';
 import { getEngine } from '@/server/engine';
 import { isGuardError, requireAdmin } from '../_guard';
+import { flushAfter } from '../_flush';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,7 +20,7 @@ export async function GET() {
   return NextResponse.json({ ok: true, signals: getDb().listCustomSignals() });
 }
 
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const guard = requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
   const { admin } = guard;
@@ -107,4 +108,11 @@ export async function POST(req: Request) {
   getEngine().broadcastSignals();
 
   return NextResponse.json({ ok: true, signal: sig });
+}
+
+
+/* §3  Durability wrappers — see ../_flush.ts. */
+
+export async function POST(req: Request) {
+  return flushAfter(handlePost(req));
 }

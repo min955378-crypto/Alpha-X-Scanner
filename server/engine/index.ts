@@ -109,6 +109,11 @@ class Engine {
     this.started = true;
     const db = getDb();
 
+    /* §3  Adopt whatever Postgres already holds before anything reads the db,
+       so admin changes survive a serverless cold start. Failure is
+       non-fatal — the in-memory store stays authoritative. */
+    await db.hydrateFromPostgres();
+
     /* Universe: live exchangeInfo when reachable, bundled snapshot otherwise. */
     const monitoring = monitoringTagSet();
     let entries = await fetchUniverse(monitoring);

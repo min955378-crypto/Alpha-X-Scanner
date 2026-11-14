@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { getDb } from '@/server/engine/db';
 import { getEngine } from '@/server/engine';
 import { isGuardError, requireAdmin } from '../_guard';
+import { flushAfter } from '../_flush';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -14,7 +15,7 @@ export const dynamic = 'force-dynamic';
  * Phase A / Phase B warm-up ladder. The terminal stays live throughout because
  * symbol state is reused for any symbol that still exists.
  */
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const guard = requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
   const { admin } = guard;
@@ -26,4 +27,11 @@ export async function POST(req: Request) {
   getDb().audit(admin.username, `MARKET_RESEED ${result.mode}`, null);
 
   return NextResponse.json({ ...result, ok: true });
+}
+
+
+/* §3  Durability wrappers — see ../_flush.ts. */
+
+export async function POST(req: Request) {
+  return flushAfter(handlePost(req));
 }

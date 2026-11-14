@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { SNAPSHOT_VERSION, getDb } from '@/server/engine/db';
 import { isGuardError, requireAdmin } from '../_guard';
+import { flushAfter } from '../_flush';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -38,7 +39,7 @@ export async function GET(req: Request) {
   });
 }
 
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const guard = requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
   const { admin } = guard;
@@ -70,4 +71,11 @@ export async function POST(req: Request) {
 
   db.audit(admin.username, 'BACKUP_IMPORT', null);
   return NextResponse.json({ ok: true, counts: result.counts });
+}
+
+
+/* §3  Durability wrappers — see ../_flush.ts. */
+
+export async function POST(req: Request) {
+  return flushAfter(handlePost(req));
 }
