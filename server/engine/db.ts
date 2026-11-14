@@ -46,7 +46,16 @@ import {
  * single-file change — call sites and row shapes stay identical.
  */
 
-const DATA_DIR = join(process.cwd(), '.data');
+/**
+ * `AX_DATA_DIR` lets a caller point the snapshot somewhere other than the
+ * server's working directory. The QA suites set it to a scratch path so that
+ * exercising the persistence layer cannot clobber the store a running server
+ * (or a developer) is using — before this existed, `npm run qa:pg` overwrote
+ * the real `.data` snapshot with its `pgadmin` fixtures and broke local logins.
+ */
+const DATA_DIR = process.env.AX_DATA_DIR
+  ? join(process.env.AX_DATA_DIR)
+  : join(process.cwd(), '.data');
 const DB_FILE = join(DATA_DIR, 'alpha-x-scanner-db.json');
 
 export interface UserRecord {
