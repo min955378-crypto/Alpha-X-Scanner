@@ -11,6 +11,7 @@ import { useSettings } from '@/components/providers/SettingsProvider';
 import { useMarket } from '@/components/providers/MarketProvider';
 import { useToast } from '@/components/providers/ToastProvider';
 import { playChime } from '@/components/scanners/ScannerView';
+import { Icon } from '@/components/ui/Icons';
 
 /**
  * §11.2  User settings: display & density, timezone & clock, chart & scanner
@@ -35,9 +36,9 @@ export default function SettingsPage() {
     <AppShell>
       <main className="min-w-0 flex-1 space-y-3 p-3">
         <header className="card p-3">
-          <h1 className="text-[18px] font-bold text-white">⚙ Settings</h1>
+          <h1 className="flex items-center gap-2 text-[18px] font-bold text-white"><Icon name="settings" size={18} className="text-emerald-400" /> Settings</h1>
           <p className="mt-1 text-[11.5px] text-text-secondary">
-            Preferences are stored locally under <code className="mono-num text-amber-300">scalppro:v2:*</code> and the
+            Preferences are stored locally under <code className="mono-num text-amber-300">alpha-x-scanner:v2:*</code> and the
             cross-device subset syncs to your user profile.
           </p>
         </header>
@@ -186,7 +187,7 @@ export default function SettingsPage() {
           {/* 4 — Backup & migration */}
           <Section title="💾 Watchlist & Preset Backup">
             <p className="text-[11px] leading-relaxed text-text-secondary">
-              The <code className="mono-num">scalppro:v1:*</code> → <code className="mono-num">scalppro:v2:*</code>{' '}
+              The <code className="mono-num">alpha-x-scanner:v1:*</code> → <code className="mono-num">alpha-x-scanner:v2:*</code>{' '}
               migrator runs automatically on startup, so v1 watchlists, timeframes, sounds, presets and disclaimer
               acknowledgements carry over with zero data loss.
             </p>
@@ -198,7 +199,7 @@ export default function SettingsPage() {
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement('a');
                   a.href = url;
-                  a.download = `scalppro-backup-${new Date().toISOString().slice(0, 10)}.json`;
+                  a.download = `alpha-x-scanner-backup-${new Date().toISOString().slice(0, 10)}.json`;
                   a.click();
                   URL.revokeObjectURL(url);
                 }}
@@ -222,7 +223,7 @@ export default function SettingsPage() {
                     push({ title: 'Backup imported', body: `${n} keys restored — reloading…`, level: 'success' });
                     setTimeout(() => window.location.reload(), 900);
                   } catch {
-                    push({ title: 'Import failed', body: 'That file is not a ScalpPro backup.', level: 'error' });
+                    push({ title: 'Import failed', body: 'That file is not an Alpha X Scanner backup.', level: 'error' });
                   }
                 }}
               />

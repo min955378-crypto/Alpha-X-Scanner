@@ -17,7 +17,7 @@ export default function ScannerPage() {
           <div className="card p-6 text-center">
             <h1 className="text-[15px] font-bold text-white">Unknown scanner</h1>
             <p className="mt-1 text-[11.5px] text-text-secondary">
-              “{params.slug}” is not one of the five ScalpPro scanners.
+              “{params.slug}” is not one of the five Alpha X Scanner scanners.
             </p>
           </div>
         </main>

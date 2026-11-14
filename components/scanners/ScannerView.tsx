@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
 import { formatClock, formatRsi, formatRvol, levelCopyValue, tradingViewLink } from '@/lib/format';
 import { type ScannerMeta, type ScannerSignal, type SignalDirection, type SignalStage } from '@/lib/types';
@@ -9,6 +9,8 @@ import { useMarket } from '@/components/providers/MarketProvider';
 import { useSettings } from '@/components/providers/SettingsProvider';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { CopyableValue, Pill, ScoreMeter, Toggle } from '@/components/ui';
+import { Icon } from '@/components/ui/Icons';
+import { TiltCard } from '@/components/ui/Motion3D';
 import { useToast } from '@/components/providers/ToastProvider';
 
 /**
@@ -63,7 +65,7 @@ export function ScannerView({ meta }: { meta: ScannerMeta }) {
         /* autoplay policy — chime will engage on first user gesture */
       }
     }
-    log(`▶ ${meta.name} started · subscribed to ${timeframe} scan cycle`);
+    log(`${meta.name} started · subscribed to ${timeframe} scan cycle`);
     void scanNow(meta.slug).then((s) => log(`scan complete · ${s.length} setups`));
   }, [meta.name, meta.slug, scanNow, settings.soundEnabled, timeframe, log]);
 
@@ -92,7 +94,7 @@ export function ScannerView({ meta }: { meta: ScannerMeta }) {
     setProgress(100);
     setTimeout(() => setProgress(0), 700);
     setScanning(false);
-    log(`🔍 manual scan · ${result.length} setups · ${result.filter((s) => s.stage === 'ENTRY_READY').length} entry-ready`);
+    log(`manual scan · ${result.length} setups · ${result.filter((s) => s.stage === 'ENTRY_READY').length} entry-ready`);
     if (settings.soundEnabled && result.some((s) => s.stage === 'ENTRY_READY')) playChime(settings.alertVolume);
   }, [entitled, meta.slug, push, scanNow, settings.alertVolume, settings.soundEnabled, log]);
 
@@ -136,16 +138,16 @@ export function ScannerView({ meta }: { meta: ScannerMeta }) {
 
             <div className="mt-2.5 flex flex-wrap gap-1.5">
               <button type="button" onClick={start} disabled={running} className="btn-green disabled:opacity-40">
-                ▶ Start
+                <Icon name="play" size={13} /> Start
               </button>
               <button type="button" onClick={stop} disabled={!running} className="btn-red disabled:opacity-40">
-                ■ Stop
+                <Icon name="pause" size={13} /> Stop
               </button>
               <button type="button" onClick={reset} className="btn-ghost">
-                ↺ Reset
+                <Icon name="reset" size={13} /> Reset
               </button>
               <button type="button" onClick={manualScan} disabled={scanning} className="btn-blue disabled:opacity-40">
-                🔍 Scan Now
+                <Icon name="scan" size={13} /> Scan Now
               </button>
             </div>
           </div>
@@ -161,7 +163,7 @@ export function ScannerView({ meta }: { meta: ScannerMeta }) {
               Last: {lastScanAt[meta.slug] ? formatClock(new Date(lastScanAt[meta.slug]!), settings.timezone, settings.clock24) : '—'}
             </span>
             <button type="button" onClick={manualScan} className="btn-ghost px-1.5 py-0.5 text-[10px]">
-              🔍 Scan Now
+              <Icon name="scan" size={13} /> Scan Now
             </button>
           </div>
         </header>
@@ -170,7 +172,7 @@ export function ScannerView({ meta }: { meta: ScannerMeta }) {
         <section className="card">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] p-2.5">
             <div className="flex items-center gap-2">
-              <h2 className="text-[13px] font-bold text-white">🔔 Signals</h2>
+              <h2 className="flex items-center gap-1.5 text-[13px] font-bold text-white"><Icon name="activity" size={14} /> Signals</h2>
               <span className="rounded-full bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-bold text-emerald-400">
                 {filtered.length}
               </span>
@@ -214,7 +216,7 @@ export function ScannerView({ meta }: { meta: ScannerMeta }) {
       {/* ------------------------ RIGHT COLUMN ------------------------ */}
       <aside className="w-full space-y-3 xl:w-[300px]">
         <div className="card space-y-2 p-2.5">
-          <h3 className="text-[12px] font-bold text-white">⚙ Settings</h3>
+          <h3 className="flex items-center gap-1.5 text-[12px] font-bold text-white"><Icon name="settings" size={13} /> Settings</h3>
           <Toggle
             id="scanner-sound"
             checked={settings.soundEnabled}
@@ -269,7 +271,7 @@ export function ScannerView({ meta }: { meta: ScannerMeta }) {
         </div>
 
         <div className="card p-2.5">
-          <h3 className="mb-2 text-[12px] font-bold text-white">📋 Logs</h3>
+          <h3 className="mb-2 flex items-center gap-1.5 text-[12px] font-bold text-white"><Icon name="book" size={13} /> Logs</h3>
           <div className="mono-num max-h-[180px] space-y-0.5 overflow-y-auto text-[10px] leading-relaxed text-text-secondary">
             {logs.length === 0 ? <div>No log entries yet</div> : null}
             {logs.map((l, i) => (
@@ -281,7 +283,7 @@ export function ScannerView({ meta }: { meta: ScannerMeta }) {
         </div>
 
         <div className="card p-2.5">
-          <h3 className="mb-2 text-[12px] font-bold text-white">⏳ Waiting / BUY Coins</h3>
+          <h3 className="mb-2 flex items-center gap-1.5 text-[12px] font-bold text-white"><Icon name="clock" size={13} /> Waiting / BUY Coins</h3>
           {waiting.length === 0 ? (
             <p className="text-[11px] text-text-muted">No active coins</p>
           ) : (
@@ -314,8 +316,18 @@ function SignalCard({ signal }: { signal: ScannerSignal }) {
   const badge =
     signal.stage === 'ENTRY_READY' ? (signal.direction === 'LONG' ? 'BUY' : 'SHORT') : signal.stage;
 
+  /* §Phase 2 §2.4 — rotating conic laser border on every BUY / SHORT entry. */
+  const entryReady = signal.stage === 'ENTRY_READY';
+  const laser = entryReady ? (signal.direction === 'LONG' ? '#00D26A' : '#FF3B5C') : null;
+
   return (
-    <article className="rounded-lg border border-white/[0.07] bg-bg-card-2 p-2.5">
+    <TiltCard max={5} className="rounded-lg">
+      <article
+        className={`relative rounded-lg border border-white/[0.07] bg-bg-card-2 p-2.5 ${
+          laser ? 'laser-border' : ''
+        }`}
+        style={laser ? ({ '--laser-color': laser } as CSSProperties) : undefined}
+      >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <StageBadge stage={signal.stage} direction={signal.direction} label={badge} />
@@ -379,7 +391,8 @@ function SignalCard({ signal }: { signal: ScannerSignal }) {
             ))}
         </div>
       </details>
-    </article>
+      </article>
+    </TiltCard>
   );
 }
 

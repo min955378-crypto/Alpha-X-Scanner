@@ -22,7 +22,7 @@ export function WatchlistView({ frame, timeframe }: { frame: MarketFrame | null;
         <div className="text-[15px] font-bold text-white">★ No watchlist coins yet</div>
         <p className="mx-auto mt-1.5 max-w-md text-[11.5px] leading-relaxed text-text-secondary">
           Tap the ★ on any row in the Pro Table or any coin in Coin Finder to pin it here. Your watchlist syncs to
-          <code className="mono-num mx-1 text-amber-300">scalppro:v2:watchlist</code>
+          <code className="mono-num mx-1 text-amber-300">alpha-x-scanner:v2:watchlist</code>
           and to your user profile.
         </p>
       </div>

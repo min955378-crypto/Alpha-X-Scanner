@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { AuroraBackground } from '@/components/ui/Motion3D';
+import { Icon, type IconName } from '@/components/ui/Icons';
 import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
@@ -82,7 +84,10 @@ export function AppShell({
   const booting = boot && !boot.phaseAReady;
 
   return (
-    <div className="flex min-h-screen flex-col overflow-x-clip bg-bg-canvas dash-tint">
+    <div className="relative flex min-h-screen flex-col overflow-x-clip bg-bg-0">
+      {/* §Phase 2 §2.2 — 60fps 3D perspective grid + volumetric orbs. */}
+      <AuroraBackground />
+      <div className="relative z-10 flex min-h-screen flex-col dash-tint">
       <TopBar />
       <TabBar right={<TabUtilities />} onOpenSidebar={rightSidebar ? () => setDrawerOpen(true) : undefined} />
 
@@ -129,6 +134,7 @@ export function AppShell({
 
       <BottomNav />
       {showDisclaimer ? <DisclaimerModal onAccept={acceptDisclaimer} /> : null}
+      </div>
     </div>
   );
 }
@@ -139,26 +145,29 @@ function TabUtilities() {
   const dashboard = pathname.startsWith('/dashboard');
   const items = dashboard
     ? [
-        { href: '/dashboard?view=table', label: '📋 Pro Table' },
-        { href: '/dashboard?view=finder', label: '🔍 Coin Finder' },
-        { href: '/dashboard?view=watchlist', label: '★ Watchlist' },
+        { href: '/dashboard?view=table', label: 'Pro Table', icon: 'table' as IconName },
+        { href: '/dashboard?view=finder', label: 'Coin Finder', icon: 'search' as IconName },
+        { href: '/dashboard?view=watchlist', label: 'Watchlist', icon: 'star' as IconName },
       ]
-    : [{ href: '/dashboard?view=table', label: '📋 Pro Table' }, { href: '/dashboard?view=finder', label: '🔍 Coin Finder' }];
+    : [
+        { href: '/dashboard?view=table', label: 'Pro Table', icon: 'table' as IconName },
+        { href: '/dashboard?view=finder', label: 'Coin Finder', icon: 'search' as IconName },
+      ];
 
   return (
     <>
       <div className="hidden items-center gap-1.5 xl:flex">
         {items.map((it) => (
           <Link key={it.href} href={it.href} className="btn-ghost whitespace-nowrap">
-            {it.label}
+            <Icon name={it.icon} size={12} /> {it.label}
           </Link>
         ))}
       </div>
-      <Link href="/tutorials" className="btn-ghost whitespace-nowrap" title="Tutorial hub (5 videos)">
-        📘 Tutorials
+      <Link href="/tutorials" className="btn-ghost inline-flex items-center gap-1.5 whitespace-nowrap" title="Tutorial hub">
+        <Icon name="book" size={13} /> Tutorials
       </Link>
-      <Link href="/settings" className="btn-ghost whitespace-nowrap" title="Settings">
-        ⚙
+      <Link href="/settings" className="btn-ghost inline-flex items-center" title="Settings" aria-label="Settings">
+        <Icon name="settings" size={14} />
       </Link>
     </>
   );

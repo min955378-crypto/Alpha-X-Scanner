@@ -330,7 +330,7 @@ class Engine {
   }
 }
 
-const GLOBAL_KEY = '__scalppro_engine__';
+const GLOBAL_KEY = '__alpha_x_engine__';
 
 export function getEngine(): Engine {
   const g = globalThis as unknown as Record<string, Engine | undefined>;

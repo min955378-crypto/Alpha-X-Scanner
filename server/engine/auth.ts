@@ -9,7 +9,7 @@ import { getDb, verifyPassword, type Database, type UserRecord } from './db';
  * no self-serve checkout (§1.1 explicit non-goals).
  */
 
-export const SESSION_COOKIE = 'scalppro_session';
+export const SESSION_COOKIE = 'alpha_x_session';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
 interface SessionPayload {

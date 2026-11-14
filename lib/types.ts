@@ -1,5 +1,5 @@
 /**
- * ScalpPro — shared, isomorphic type contracts.
+ * Alpha X Scanner — shared, isomorphic type contracts.
  *
  * Everything on the wire between the Global Quant Worker and the React client
  * is described here so that the compact encoding in `lib/wire.ts` and the
@@ -158,7 +158,10 @@ export interface ScannerMeta {
   /** Right-sidebar status-row label (spec §6.6). */
   sidebarLabel: string;
   name: string;
+  /** Micro-accent only — navigation renders the vector `icon` instead. */
   emoji: string;
+  /** Key into components/ui/Icons. */
+  icon: 'bolt' | 'blocks' | 'trending' | 'hidden' | 'crosshair';
   accent: string;
   category: string;
   tfLabel: string;
@@ -176,10 +179,11 @@ export type EntitlementKey =
 export const SCANNERS: ScannerMeta[] = [
   {
     slug: 'v1-scaling',
-    tabLabel: '⚡ V1 Scaling',
+    tabLabel: 'V1 Scaling',
     sidebarLabel: 'V1 Scalping',
     name: 'V1 Scaling',
     emoji: '⚡',
+    icon: 'bolt',
     accent: '#22C55E',
     category: 'Momentum Zone',
     tfLabel: '1H',
@@ -188,10 +192,11 @@ export const SCANNERS: ScannerMeta[] = [
   },
   {
     slug: 'order-block',
-    tabLabel: '🟩 Order Block',
+    tabLabel: 'Order Block',
     sidebarLabel: 'Order Block',
     name: 'Order Block',
     emoji: '🟩',
+    icon: 'blocks',
     accent: '#22C55E',
     category: 'Institutional SMC',
     tfLabel: '15M / 1H',
@@ -200,10 +205,11 @@ export const SCANNERS: ScannerMeta[] = [
   },
   {
     slug: 'ema-crossover',
-    tabLabel: '📈 EMA Crossover',
+    tabLabel: 'EMA Crossover',
     sidebarLabel: 'EMA Crossover',
     name: 'EMA Crossover',
     emoji: '📈',
+    icon: 'trending',
     accent: '#60A5FA',
     category: 'Trend Continuation',
     tfLabel: '15M / 1H',
@@ -212,10 +218,11 @@ export const SCANNERS: ScannerMeta[] = [
   },
   {
     slug: 'hidden-bullish',
-    tabLabel: '🔵 Hidden Bullish',
+    tabLabel: 'Hidden Bullish',
     sidebarLabel: 'Hidden Bullish',
     name: 'Hidden Bullish',
     emoji: '🔵',
+    icon: 'hidden',
     accent: '#60A5FA',
     category: 'Precision Setup',
     tfLabel: '1H',
@@ -224,10 +231,11 @@ export const SCANNERS: ScannerMeta[] = [
   },
   {
     slug: 'alpha-sniper',
-    tabLabel: '🎯 Alpha Sniper',
+    tabLabel: 'Alpha Sniper',
     sidebarLabel: 'Alpha Sniper',
     name: 'Alpha Sniper',
     emoji: '🎯',
+    icon: 'crosshair',
     accent: '#A78BFA',
     category: 'Sniper Confluence',
     tfLabel: '15M / 1H',

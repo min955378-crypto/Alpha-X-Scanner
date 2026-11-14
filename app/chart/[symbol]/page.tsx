@@ -31,7 +31,7 @@ function ChartInner() {
 
   useEffect(() => {
     Promise.all([
-      fetch('/pine/scalppro-overlay.pine').then((r) => r.text()),
+      fetch('/pine/alpha-x-overlay.pine').then((r) => r.text()),
       fetch('/pine/alpha-sniper.pine').then((r) => r.text()),
     ]).then(([overlay, sniper]) => setScripts({ overlay, sniper }));
   }, []);
@@ -127,7 +127,7 @@ function ChartInner() {
             />
           </div>
           <p className="border-t border-white/[0.06] px-3 py-1.5 text-[10px] text-text-muted">
-            Charts are served by TradingView. ScalpPro is an independent educational tool and is not affiliated with
+            Charts are served by TradingView. Alpha X Scanner is an independent educational tool and is not affiliated with
             TradingView or Binance.
           </p>
         </section>
@@ -135,8 +135,8 @@ function ChartInner() {
         {/* Pine scripts */}
         <section className="grid gap-3 xl:grid-cols-2">
           <ScriptCard
-            title="ScalpPro Overlay — Dual EMA + 500-Candle Backtest"
-            file="/pine/scalppro-overlay.pine"
+            title="Alpha X Scanner Overlay — Dual EMA + 500-Candle Backtest"
+            file="/pine/alpha-x-overlay.pine"
             body={scripts?.overlay ?? 'Loading…'}
             note="Script 1 • overlay=true • max_bars_back=600 • SL-first, no entry-bar exit."
           />

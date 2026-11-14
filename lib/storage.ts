@@ -3,11 +3,11 @@
 /**
  * §11.2  Local storage layer with the mandatory idempotent `v1 -> v2`
  * migrator. Runs once on client init and guarantees zero data loss for users
- * upgrading from ScalpPro v1.
+ * upgrading from Alpha X Scanner v1.
  */
 
-export const NS_V1 = 'scalppro:v1';
-export const NS_V2 = 'scalppro:v2';
+export const NS_V1 = 'alpha-x-scanner:v1';
+export const NS_V2 = 'alpha-x-scanner:v2';
 
 export type StorageKey =
   | 'watchlist'

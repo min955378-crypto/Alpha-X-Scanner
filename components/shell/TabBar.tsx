@@ -4,19 +4,21 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 import { SCANNERS } from '@/lib/types';
+import { Icon, type IconName } from '@/components/ui/Icons';
 
 export interface NavTab {
   href: string;
   label: string;
-  emoji: string;
+  /** §4.2  Vector icon replaces the emoji that used to prefix every tab. */
+  icon: IconName;
   /** Amber active treatment, per §5.2 for Binance Risk Watch. */
   accent?: 'green' | 'amber';
 }
 
 export const TABS: NavTab[] = [
-  { href: '/dashboard', label: 'Dashboard', emoji: '🏠' },
-  ...SCANNERS.map((s) => ({ href: `/scanners/${s.slug}`, label: s.name, emoji: s.emoji })),
-  { href: '/risk-watch', label: 'Binance Risk Watch', emoji: '⚠', accent: 'amber' as const },
+  { href: '/dashboard', label: 'Dashboard', icon: 'home' as IconName },
+  ...SCANNERS.map((sc) => ({ href: `/scanners/${sc.slug}`, label: sc.name, icon: sc.icon as IconName })),
+  { href: '/risk-watch', label: 'Binance Risk Watch', icon: 'shieldAlert' as IconName, accent: 'amber' as const },
 ];
 
 /**
@@ -56,7 +58,7 @@ export function TabBar({
                     : 'border-transparent text-text-secondary hover:text-white'
               }`}
             >
-              <span aria-hidden="true">{tab.emoji}</span>
+              <Icon name={tab.icon} size={14} />
               <span className="whitespace-nowrap">{tab.label}</span>
             </Link>
           );
@@ -78,12 +80,12 @@ export function TabBar({
 /** §13  Sticky 5-item bottom navigation for ≤768px, with 44×44px targets. */
 export function BottomNav({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   const pathname = usePathname();
-  const items: Array<{ href: string; label: string; emoji: string }> = [
-    { href: '/dashboard?view=heatmap', label: 'Heatmap', emoji: '🏠' },
-    { href: '/scanners/v1-scaling', label: 'Scanners', emoji: '🎯' },
-    { href: '/dashboard?view=finder', label: 'Finder', emoji: '🔍' },
-    { href: '/risk-watch', label: 'Risk Watch', emoji: '⚠' },
-    { href: '/settings', label: 'Me/TF', emoji: '⚙' },
+  const items: Array<{ href: string; label: string; icon: IconName }> = [
+    { href: '/dashboard?view=heatmap', label: 'Heatmap', icon: 'home' as IconName },
+    { href: '/scanners/v1-scaling', label: 'Scanners', icon: 'crosshair' as IconName },
+    { href: '/dashboard?view=finder', label: 'Finder', icon: 'search' as IconName },
+    { href: '/risk-watch', label: 'Risk Watch', icon: 'shieldAlert' as IconName },
+    { href: '/settings', label: 'Me/TF', icon: 'settings' as IconName },
   ];
 
   return (
@@ -103,9 +105,7 @@ export function BottomNav({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
               active ? 'text-amber-400' : 'text-text-muted'
             }`}
           >
-            <span aria-hidden="true" className="text-[15px] leading-none">
-              {it.emoji}
-            </span>
+            <Icon name={it.icon} size={17} />
             <span>{it.label}</span>
           </Link>
         );

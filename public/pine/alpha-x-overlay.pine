@@ -1,5 +1,5 @@
 //@version=5
-indicator("ScalpPro — Dual EMA & Last 500 Candles Backtest", shorttitle="ScalpPro Overlay", overlay=true, max_bars_back=600)
+indicator("Alpha X Scanner — Dual EMA & Last 500 Candles Backtest", shorttitle="Alpha X Scanner Overlay", overlay=true, max_bars_back=600)
 
 // ─── 1. Inputs ───────────────────────────────────────────────────────────────
 fastLen   = input.int(13, "Fast EMA Length", minval=1, group="EMAs")

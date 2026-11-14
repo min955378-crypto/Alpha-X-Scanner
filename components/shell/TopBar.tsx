@@ -54,7 +54,7 @@ export function TopBar() {
             <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
             <polyline points="16 7 22 7 22 13" />
           </svg>
-          <span className="text-[13px]">ScalpPro</span>
+          <span className="text-[13px]">Alpha X Scanner</span>
         </Link>
 
         <span className="hidden shrink-0 rounded border border-emerald-500/45 bg-emerald-500/10 px-1.5 py-0.5 text-[9.5px] font-semibold text-emerald-400 sm:inline">
@@ -104,7 +104,7 @@ export function TopBar() {
             <div className="mt-2.5 border-t border-white/5 pt-2 text-[10px] text-text-secondary">
               {activeScanners.length === SCANNERS.length
                 ? 'All five scanners unlocked.'
-                : 'Contact admin to activate Ultra Pro.'}
+                : 'Contact Muhammad Ibrahim to activate Ultra Pro.'}
             </div>
             <a
               href={BRAND.whatsappHref}
@@ -119,15 +119,6 @@ export function TopBar() {
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
-        {user?.role === 'ADMIN' ? (
-          <Link
-            href="/admin"
-            className="rounded border border-amber-500/55 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-400 hover:bg-amber-500/20"
-          >
-            Admin Panel
-          </Link>
-        ) : null}
-
         <div className="hidden items-center gap-1.5 rounded-full border border-blue-500/45 bg-blue-500/10 px-2.5 py-0.5 text-[10px] md:flex">
           <span className="h-1.5 w-1.5 rounded-full bg-blue-400" />
           <span className="font-medium text-blue-400">New York</span>

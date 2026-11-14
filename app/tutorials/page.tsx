@@ -17,7 +17,7 @@ export default function TutorialsPage() {
     <AppShell>
       <main className="min-w-0 flex-1 space-y-3 p-3">
         <header className="card p-3">
-          <h1 className="text-[18px] font-bold text-white">📘 ScalpPro Tutorial Hub</h1>
+          <h1 className="text-[18px] font-bold text-white">📘 Alpha X Scanner Tutorial Hub</h1>
           <p className="mt-1 text-[11.5px] text-text-secondary">
             The complete official series from{' '}
             <span className="font-semibold text-white">{BRAND.promoHeadline}</span> — every video with an English and

@@ -35,7 +35,7 @@ export function DisclaimerModal({ onAccept }: { onAccept: () => void }) {
             • No scanner, indicator or signal guarantees a profit. Every signal is scored 0–100 and includes an
             invalidation level.
           </li>
-          <li>• ScalpPro never asks for exchange API keys and cannot place trades.</li>
+          <li>• Alpha X Scanner never asks for exchange API keys and cannot place trades.</li>
         </ul>
 
         <label className="flex cursor-pointer items-start gap-2 text-[11.5px] text-text-secondary">

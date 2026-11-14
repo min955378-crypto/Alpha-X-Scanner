@@ -54,8 +54,9 @@
   --tile-warn-border: rgba(245, 179, 1, 0.7);
   --tile-warn-text: #fde047;
 
-  /* Fonts */
-  --font-ui: 'Inter', 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* Fonts — §5.1 three-tier pairing */
+  --font-display: 'Space Grotesk', 'Plus Jakarta Sans', 'Inter', sans-serif;
+  --font-ui: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-num: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-ur: 'Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', 'Inter', sans-serif;
 }
@@ -118,6 +119,9 @@
   /* §3.1  Tabular numerals for every numeric read-out in the product. */
   .mono-num {
     font-family: var(--font-num);
+    /* §5.1 — digits must not reflow when a live tick changes their width. */
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1, 'zero' 1;
     font-variant-numeric: tabular-nums;
     font-feature-settings: 'tnum' 1, 'zero' 1;
   }
@@ -191,5 +195,173 @@
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+  }
+}
+
+
+/* ============================================================================
+   §5.2 / PHASE 2 §2  GLASSMORPHISM · 3D TILT · LASER BORDERS · TICK PULSE
+   ========================================================================= */
+
+/* Razor-sharp vector icons with a subtle neon bloom (§4.2). */
+.icon {
+  filter: drop-shadow(0 0 6px currentColor);
+}
+
+/* Metallic white→platinum brand headings (§Phase 2 §3). */
+.heading-gradient {
+  background: linear-gradient(180deg, #ffffff 0%, #cbd5e1 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.025em;
+}
+
+/* Deep obsidian glass panel with a 1px specular top edge. */
+.glass {
+  background: rgba(12, 16, 26, 0.72);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 18px 50px rgba(0, 0, 0, 0.5);
+}
+
+/* ---- 3D perspective tilt + cursor spotlight ---------------------------- */
+.tilt-card {
+  --rx: 0deg;
+  --ry: 0deg;
+  --mouse-x: 50%;
+  --mouse-y: 50%;
+  transform: perspective(1000px) rotateX(var(--rx)) rotateY(var(--ry));
+  transform-style: preserve-3d;
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms ease;
+  will-change: transform;
+}
+.tilt-card.is-active {
+  transform: perspective(1000px) rotateX(var(--rx)) rotateY(var(--ry)) translateZ(4px);
+  transition-duration: 90ms;
+}
+/* Cursor-tracking radial spotlight border. */
+.tilt-spotlight::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 220ms ease;
+  background: radial-gradient(
+    420px circle at var(--mouse-x) var(--mouse-y),
+    rgba(0, 210, 106, 0.22),
+    transparent 60%
+  );
+}
+.tilt-spotlight.is-active::before {
+  opacity: 1;
+}
+
+/* ---- Animated 360° conic laser border ---------------------------------- */
+.laser-border {
+  position: relative;
+  isolation: isolate;
+}
+.laser-border::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  z-index: -1;
+  background: conic-gradient(
+    from var(--laser-angle, 0deg),
+    transparent 0deg,
+    var(--laser-color, #00d26a) 40deg,
+    transparent 110deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: laser-spin 3.2s linear infinite;
+}
+@property --laser-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes laser-spin {
+  to {
+    --laser-angle: 360deg;
+  }
+}
+
+/* ---- Live tick pulse (§Phase 2 §2.4) ----------------------------------- */
+@keyframes tick-pulse-up {
+  0% {
+    box-shadow: 0 0 0 0 rgba(0, 210, 106, 0.55);
+    background-color: rgba(0, 210, 106, 0.18);
+  }
+  100% {
+    box-shadow: 0 0 0 14px rgba(0, 210, 106, 0);
+    background-color: transparent;
+  }
+}
+@keyframes tick-pulse-down {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 59, 92, 0.55);
+    background-color: rgba(255, 59, 92, 0.18);
+  }
+  100% {
+    box-shadow: 0 0 0 14px rgba(255, 59, 92, 0);
+    background-color: transparent;
+  }
+}
+.tick-up {
+  animation: tick-pulse-up 600ms ease-out;
+}
+.tick-down {
+  animation: tick-pulse-down 600ms ease-out;
+}
+
+/* Auto-scrolling marquee for the 12-feature showcase. */
+@keyframes marquee-up {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-50%);
+  }
+}
+.marquee-vertical {
+  animation: marquee-up var(--marquee-duration, 46s) linear infinite;
+}
+.marquee-vertical:hover {
+  animation-play-state: paused;
+}
+
+/* §Phase 2  Respect reduced-motion across every effect above. */
+@media (prefers-reduced-motion: reduce) {
+  .tilt-card,
+  .tilt-card.is-active {
+    transform: none !important;
+  }
+  .laser-border::after,
+  .marquee-vertical {
+    animation: none !important;
+  }
+  .tick-up,
+  .tick-down {
+    animation-duration: 1ms;
   }
 }
