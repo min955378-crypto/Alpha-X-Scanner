@@ -17,6 +17,7 @@ import { useAuth } from '@/components/providers/AuthProvider';
 import { useMarket } from '@/components/providers/MarketProvider';
 import { useSettings } from '@/components/providers/SettingsProvider';
 import { Modal } from '@/components/ui';
+import { ChartDrawerProvider } from '@/components/chart/ChartDrawer';
 
 /**
  * §5  Global app shell: 32px top bar + 36px tab bar + content + legal footer.
@@ -122,6 +123,7 @@ export function AppShell({
   const booting = boot && !boot.phaseAReady;
 
   return (
+    <ChartDrawerProvider>
     <div className="relative flex min-h-screen flex-col overflow-x-clip bg-bg-0">
       {/* §Phase 2 §2.2 — 60fps 3D perspective grid + volumetric orbs. */}
       <AuroraBackground />
@@ -175,6 +177,7 @@ export function AppShell({
       <LicenseRenewalModal />
       </div>
     </div>
+    </ChartDrawerProvider>
   );
 }
 

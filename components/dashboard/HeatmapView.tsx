@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 
 import { ZONES, zoneForRsi, type CoinSnapshot, type MarketFrame, type Timeframe, type ZoneId } from '@/lib/types';
 import { useSettings } from '@/components/providers/SettingsProvider';
@@ -9,6 +8,7 @@ import { HeatmapHeader } from './HeatmapHeader';
 import { DENSITY } from '@/lib/constants';
 import { CoinTile, heatmapKeyNav } from './CoinTile';
 import { VirtualGrid } from '@/components/ui/VirtualGrid';
+import { useOpenCoinChart } from '@/components/chart/ChartDrawer';
 
 /**
  * §6.3  Mode A — the six RSI Heatmap zones.
@@ -27,24 +27,19 @@ export function HeatmapView({
   enableZoneFilters?: boolean;
 }) {
   const { settings } = useSettings();
-  const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
   const [activeZones, setActiveZones] = useState<Set<ZoneId>>(new Set());
   const [spotlightSymbol, setSpotlightSymbol] = useState<string | null>(null);
 
+  /* §1.1  Clicking a tile opens the Live Chart Studio as a slide-over so the
+     trader never loses their place in the heatmap. Cmd/Ctrl-click still opens
+     the standalone /chart route in a new tab. */
+  const openDrawer = useOpenCoinChart();
   const openCoin = useCallback(
     (coin: CoinSnapshot, tf: Timeframe) => {
-      if (settings.chartMode === 'INTERNAL') {
-        router.push(`/chart/${coin.baseAsset}?tf=${tf}`);
-        return;
-      }
-      window.open(
-        `https://www.tradingview.com/chart/?symbol=BINANCE:${coin.baseAsset}USDT&interval=${TF_TOKEN[tf]}`,
-        '_blank',
-        'noopener,noreferrer',
-      );
+      openDrawer(coin, tf);
     },
-    [router, settings.chartMode],
+    [openDrawer],
   );
 
   const grouped = useMemo(() => {
@@ -148,4 +143,4 @@ export function HeatmapView({
   );
 }
 
-const TF_TOKEN: Record<Timeframe, string> = { '15M': '15', '30M': '30', '1H': '60', '4H': '240', '1D': 'D' };
+

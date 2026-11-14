@@ -3,9 +3,10 @@
 import { Fragment, useCallback, useMemo, useState } from 'react';
 
 import { computeScore } from '@/lib/score';
-import { formatPct, formatPrice, formatRsi, formatRvol, formatVolume, tradingViewLink } from '@/lib/format';
+import { formatPct, formatPrice, formatRsi, formatRvol, formatVolume } from '@/lib/format';
 import { ZONES, zoneForRsi, type CoinSnapshot, type MarketFrame, type Timeframe, type ZoneId } from '@/lib/types';
 import { useSettings } from '@/components/providers/SettingsProvider';
+import { useOpenCoinChart } from '@/components/chart/ChartDrawer';
 import { CopyButton, Pill } from '@/components/ui';
 
 /**
@@ -56,6 +57,7 @@ interface Condition {
 }
 
 export function CoinFinderView({ frame, timeframe }: { frame: MarketFrame | null; timeframe: Timeframe }) {
+  const openCoin = useOpenCoinChart();
   const { settings, savePreset, deletePreset } = useSettings();
 
   const [minPrice, setMinPrice] = useState('');
@@ -459,13 +461,16 @@ export function CoinFinderView({ frame, timeframe }: { frame: MarketFrame | null
                       </td>
                       <td className="px-2 py-1.5 text-right">
                         <a
-                          href={tradingViewLink(coin.baseAsset, timeframe)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
+                          href={`/chart/${coin.baseAsset}?tf=${timeframe}`}
+                          onClick={(e) => {
+                            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                            e.preventDefault();
+                            e.stopPropagation();
+                            openCoin(coin, timeframe);
+                          }}
                           className="rounded border border-white/10 px-1.5 py-0.5 text-[9.5px] text-text-secondary hover:text-white"
                         >
-                          Chart ↗
+                          Chart
                         </a>
                       </td>
                     </tr>

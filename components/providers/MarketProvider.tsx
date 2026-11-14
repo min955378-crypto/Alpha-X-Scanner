@@ -1,5 +1,9 @@
 'use client';
 
+/** §2  Public market-data mirrors. `api.binance.com` is geo-blocked (HTTP
+ *  451/403) from many cloud regions, so the vision data mirror is primary. */
+const DIRECT_WS_HOSTS = ['wss://data-stream.binance.vision:443', 'wss://stream.binance.com:9443'] as const;
+
 import {
   createContext,
   useCallback,
@@ -44,6 +48,8 @@ interface MarketApi {
   /** 1 Hz price overlay: symbol -> [price, changePct24h]. */
   livePrices: MutableRefObject<Map<string, [number, number]>>;
   tickVersion: number;
+  /** True while the browser holds its own live Binance price socket. */
+  streamLive: boolean;
   subscribeScanners: (slugs: ScannerSlug[]) => void;
 }
 
@@ -84,6 +90,8 @@ export function MarketProvider({
   const [signals, setSignals] = useState<Partial<Record<ScannerSlug, ScannerSignal[]>>>({});
   const [lastScanAt, setLastScanAt] = useState<Partial<Record<ScannerSlug, number>>>({});
   const [tickVersion, setTickVersion] = useState(0);
+  /** True while the browser's direct Binance miniTicker socket is live. */
+  const [streamLive, setStreamLive] = useState(false);
 
   const livePrices = useRef<Map<string, [number, number]>>(new Map());
   const socketRef = useRef<WebSocket | null>(null);
@@ -251,10 +259,114 @@ export function MarketProvider({
       setTickVersion((v) => v + 1);
       // §13  Preserve last-good state and flag the badge when a frame is late.
       if (remaining === 0 && Date.now() - deadlineRef.current > 8000) {
-        setStatus((s) => (s === 'offline' ? s : 'cached'));
+        setStatus((s) => (s === 'offline' || streamLive ? s : 'cached'));
       }
     }, 1000);
     return () => clearInterval(t);
+  }, []);
+
+  /* ------------------- §2  Direct Binance price stream ------------------- */
+
+  /**
+   * The browser connects straight to Binance's public miniTicker socket for
+   * 1-second price and 24h-change updates.
+   *
+   * Why: the app's own WebSocket server cannot exist in a serverless
+   * environment (Vercel runs each request in an isolated function), so on a
+   * serverless deployment the socket below, not the app server, is what keeps
+   * prices moving and the top-bar badge showing "● Connected".
+   *
+   * It never replaces the server frame — RSI / RVOL / ATR / Alpha Sniper are
+   * computed server-side from klines — it only overlays the fastest-moving
+   * fields on top of it.
+   */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    let socket: WebSocket | null = null;
+    let retry = 0;
+    let reconnect: ReturnType<typeof setTimeout> | null = null;
+    let hostIndex = 0;
+    let disposed = false;
+    let flushAt = 0;
+
+    const connect = () => {
+      if (disposed) return;
+      const host = DIRECT_WS_HOSTS[hostIndex];
+      if (!host) return; // both mirrors exhausted — polling still covers us
+      try {
+        socket = new WebSocket(`${host}/ws/!miniTicker@arr`);
+      } catch {
+        hostIndex += 1;
+        connect();
+        return;
+      }
+
+      socket.onopen = () => {
+        if (disposed) return;
+        retry = 0;
+        hostIndex = 0;
+        setStreamLive(true);
+      };
+
+      socket.onmessage = (ev) => {
+        if (disposed) return;
+        let batch: Array<{ s?: string; c?: string; P?: string }>;
+        try {
+          batch = JSON.parse(String(ev.data)) as Array<{ s?: string; c?: string; P?: string }>;
+        } catch {
+          return;
+        }
+        if (!Array.isArray(batch)) return;
+
+        for (const t of batch) {
+          if (!t.s) continue;
+          const price = Number(t.c);
+          if (!Number.isFinite(price) || price <= 0) continue;
+          livePrices.current.set(t.s, [price, Number(t.P) || 0]);
+        }
+
+        /* Re-render at ~1 Hz instead of on every one of ~600 messages. */
+        const now = Date.now();
+        if (now - flushAt >= 1000) {
+          flushAt = now;
+          setTickVersion((v) => v + 1);
+          /* A live price feed is exactly what "Connected" means to the user. */
+          setStatus((s) => (s === 'offline' ? s : 'connected'));
+        }
+      };
+
+      socket.onerror = () => {
+        /* Falls through to onclose, which handles the retry. */
+      };
+
+      socket.onclose = () => {
+        if (disposed) return;
+        setStreamLive(false);
+        hostIndex += 1;
+        if (hostIndex >= DIRECT_WS_HOSTS.length) {
+          /* Full circuit: back off, then start again from the primary host. */
+          hostIndex = 0;
+          retry += 1;
+        }
+        reconnect = setTimeout(connect, Math.min(15_000, 800 * 2 ** retry));
+      };
+    };
+
+    connect();
+
+    return () => {
+      disposed = true;
+      if (reconnect) clearTimeout(reconnect);
+      if (socket) {
+        socket.onclose = null;
+        try {
+          socket.close();
+        } catch {
+          /* Already closing. */
+        }
+      }
+    };
   }, []);
 
   /* -------------------------------- api --------------------------------- */
@@ -317,6 +429,7 @@ export function MarketProvider({
       scanNow,
       livePrices,
       tickVersion,
+      streamLive,
       subscribeScanners,
     }),
     [frame, status, dataMode, boot, countdown, timeframe, setTimeframe, signals, lastScanAt, scanNow, tickVersion, subscribeScanners],

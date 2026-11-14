@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
-import { formatClock, formatRsi, formatRvol, levelCopyValue, tradingViewLink } from '@/lib/format';
+import { formatClock, formatRsi, formatRvol, levelCopyValue } from '@/lib/format';
 import { type ScannerMeta, type ScannerSignal, type SignalDirection, type SignalStage } from '@/lib/types';
 import { useMarket } from '@/components/providers/MarketProvider';
+import { useOpenSymbolChart } from '@/components/chart/ChartDrawer';
 import { useSettings } from '@/components/providers/SettingsProvider';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { licenseStatus } from '@/lib/license';
@@ -30,6 +31,7 @@ const STAGE_TONE: Record<SignalStage, 'green' | 'amber' | 'blue' | 'gray'> = {
 };
 
 export function ScannerView({ meta }: { meta: ScannerMeta }) {
+  const openSymbol = useOpenSymbolChart();
   const { signals, scanNow, lastScanAt, timeframe } = useMarket();
   const { settings, update } = useSettings();
   const { user } = useAuth();
@@ -211,7 +213,7 @@ export function ScannerView({ meta }: { meta: ScannerMeta }) {
             {filtered.length === 0 ? (
               <p className="py-8 text-center text-[12px] text-text-muted">No signals yet — press Start to scan</p>
             ) : (
-              filtered.map((s) => <SignalCard key={s.id} signal={s} />)
+              filtered.map((s) => <SignalCard key={s.id} signal={s} onOpen={() => openSymbol(s.symbol, s.timeframe)} />)
             )}
           </div>
         </section>
@@ -316,7 +318,7 @@ export function ScannerView({ meta }: { meta: ScannerMeta }) {
 
 /* -------------------------------------------------------------------------- */
 
-function SignalCard({ signal }: { signal: ScannerSignal }) {
+function SignalCard({ signal, onOpen }: { signal: ScannerSignal; onOpen: () => void }) {
   const badge =
     signal.stage === 'ENTRY_READY' ? (signal.direction === 'LONG' ? 'BUY' : 'SHORT') : signal.stage;
 
@@ -336,9 +338,12 @@ function SignalCard({ signal }: { signal: ScannerSignal }) {
         <div className="flex items-center gap-2">
           <StageBadge stage={signal.stage} direction={signal.direction} label={badge} />
           <a
-            href={tradingViewLink(signal.baseAsset, signal.timeframe)}
-            target="_blank"
-            rel="noopener noreferrer"
+            href={`/chart/${signal.baseAsset}?tf=${signal.timeframe}`}
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+              e.preventDefault();
+              onOpen();
+            }}
             className="select-all text-[13px] font-bold text-white hover:underline"
           >
             {signal.baseAsset}

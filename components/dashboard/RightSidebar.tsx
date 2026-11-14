@@ -3,10 +3,11 @@
 import { useState } from 'react';
 
 import { BRAND } from '@/lib/constants';
-import { formatPct, tradingViewLink } from '@/lib/format';
+import { formatPct } from '@/lib/format';
 import { SCANNERS, TIMEFRAMES, type MarketFrame, type Timeframe } from '@/lib/types';
 import { useSettings } from '@/components/providers/SettingsProvider';
 import { useMarket } from '@/components/providers/MarketProvider';
+import { useOpenSymbolChart } from '@/components/chart/ChartDrawer';
 import { TiltCard } from '@/components/ui/Motion3D';
 import { Icon } from '@/components/ui/Icons';
 
@@ -15,7 +16,8 @@ import { Icon } from '@/components/ui/Icons';
  * Muhammad Ibrahim promo card.
  */
 export function RightSidebar({ frame }: { frame: MarketFrame | null }) {
-  const { settings, update } = useSettings();
+  const openCoin = useOpenSymbolChart();
+  const { update } = useSettings();
   const { setTimeframe, timeframe, livePrices, tickVersion } = useMarket();
   const [saved, setSaved] = useState(false);
 
@@ -42,9 +44,12 @@ export function RightSidebar({ frame }: { frame: MarketFrame | null }) {
           {movers.map((m) => (
             <li key={m.symbol}>
               <a
-                href={tradingViewLink(m.baseAsset, timeframe)}
-                target="_blank"
-                rel="noopener noreferrer"
+                href={`/chart/${m.baseAsset}?tf=${timeframe}`}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                  e.preventDefault();
+                  openCoin(m.symbol, timeframe);
+                }}
                 className="flex items-center justify-between gap-2 hover:underline"
               >
                 <span className="select-all text-white">
