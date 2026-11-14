@@ -4,6 +4,13 @@ import { dirname, join } from 'node:path';
 
 import { DEFAULT_SYSTEM_CONFIG, MONITORING_TAG_SYMBOLS } from '@/lib/constants';
 import {
+  PG_TABLES,
+  pgEnabled,
+  pgSelect,
+  pgUpsert,
+  toSystemConfigRow,
+} from './pg';
+import {
   SCANNERS,
   type AuditLogRow,
   type EntitlementKey,
@@ -532,6 +539,119 @@ class Database {
     }
   }
 
+  /* -------------------- §3  Postgres durability layer ------------------- */
+
+  private syncTimer: ReturnType<typeof setTimeout> | null = null;
+  private syncing: Promise<void> | null = null;
+
+  /**
+   * Replace the in-memory maps with whatever Postgres holds.
+   *
+   * Called once from engine boot. Each table is only adopted when it actually
+   * has rows, so a brand-new Postgres (or an unreachable one) leaves the file
+   * store's seed untouched instead of wiping it.
+   */
+  async hydrateFromPostgres(): Promise<boolean> {
+    if (!pgEnabled()) return false;
+    try {
+      const [users, licenses, configs, sysRows, coins, signals, riskItems, auditLogs] = await Promise.all([
+        pgSelect<UserRecord>(PG_TABLES.users),
+        pgSelect<LicenseRecord>(PG_TABLES.licenses),
+        pgSelect<ScannerConfigRow>(PG_TABLES.scannerConfigs),
+        pgSelect<Record<string, unknown>>(PG_TABLES.systemConfig, 'select=*&id=eq.1'),
+        pgSelect<CoinOverrideRow>(PG_TABLES.coins),
+        pgSelect<CustomSignal>(PG_TABLES.signals),
+        pgSelect<RiskWatchItem>(PG_TABLES.riskItems),
+        pgSelect<AuditLogRow>(PG_TABLES.auditLogs, 'select=*&order=createdAt.desc&limit=500'),
+      ]);
+
+      let hydrated = false;
+
+      if (users?.length) {
+        this.users = new Map(users.map((u) => [u.id, u]));
+        hydrated = true;
+      }
+      if (licenses?.length) {
+        this.licenses = new Map(licenses.map((l) => [l.id, l]));
+        hydrated = true;
+      }
+      if (configs?.length) {
+        this.scannerConfigs = new Map(configs.map((c) => [c.slug, c]));
+        hydrated = true;
+      }
+      if (sysRows?.length) {
+        this.systemConfig = toSystemConfigRow(sysRows[0]);
+        hydrated = true;
+      }
+      if (coins?.length) {
+        this.coinOverrides = Object.fromEntries(coins.map((c) => [c.symbol, c]));
+        hydrated = true;
+      }
+      if (signals?.length) {
+        this.customSignals = new Map(signals.map((c) => [c.id, c]));
+        hydrated = true;
+      }
+      if (riskItems?.length) {
+        this.riskItems = new Map(riskItems.map((r) => [r.id, r]));
+        hydrated = true;
+      }
+      if (auditLogs?.length) {
+        this.auditLogs = auditLogs.slice(0, 500);
+        hydrated = true;
+      }
+
+      if (hydrated) console.log('[db] hydrated from Supabase Postgres');
+      return hydrated;
+    } catch {
+      /* Postgres unreachable — keep serving from the in-memory store. */
+      return false;
+    }
+  }
+
+  /** Debounced write-behind so a burst of mutations costs one round trip. */
+  private schedulePostgresSync(): void {
+    if (!pgEnabled()) return;
+    if (this.syncTimer) clearTimeout(this.syncTimer);
+    this.syncTimer = setTimeout(() => {
+      this.syncTimer = null;
+      void this.flushToPostgres();
+    }, 150);
+    this.syncTimer.unref?.();
+  }
+
+  /**
+   * Push the current in-memory state to Postgres.
+   *
+   * Safe to call concurrently: overlapping calls share one in-flight promise,
+   * and a caller that needs the write to land before it returns (an admin API
+   * route on serverless, where the process may freeze) can await it directly.
+   */
+  async flushToPostgres(): Promise<void> {
+    if (!pgEnabled()) return;
+    if (this.syncing) return this.syncing;
+
+    this.syncing = (async () => {
+      try {
+        await pgUpsert(PG_TABLES.users, [...this.users.values()], 'id');
+        await pgUpsert(PG_TABLES.licenses, [...this.licenses.values()], 'id');
+        await pgUpsert(PG_TABLES.scannerConfigs, [...this.scannerConfigs.values()], 'slug');
+        await pgUpsert(PG_TABLES.systemConfig, [{ id: 1, ...this.systemConfig }], 'id');
+        await pgUpsert(PG_TABLES.coins, Object.values(this.coinOverrides), 'symbol');
+        await pgUpsert(PG_TABLES.signals, [...this.customSignals.values()], 'id');
+        await pgUpsert(PG_TABLES.riskItems, [...this.riskItems.values()], 'id');
+        await pgUpsert(PG_TABLES.auditLogs, this.auditLogs.slice(0, 500), 'id');
+      } catch {
+        /* Durability is best-effort; never take the engine down for it. */
+      }
+    })();
+
+    try {
+      await this.syncing;
+    } finally {
+      this.syncing = null;
+    }
+  }
+
   persist(): void {
     try {
       if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
@@ -552,6 +672,9 @@ class Database {
     } catch {
       /* Read-only filesystem — operate purely in memory. */
     }
+    /* Mirror to Postgres regardless: on a serverless host the file write above
+       is the part that will not survive, not the mirror. */
+    this.schedulePostgresSync();
   }
 
   /* ------------------------------- users -------------------------------- */

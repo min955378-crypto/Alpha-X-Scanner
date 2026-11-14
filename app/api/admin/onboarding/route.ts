@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import type { Entitlements } from '@/lib/types';
 import { ALL_ENTITLEMENTS, getDb } from '@/server/engine/db';
 import { isGuardError, requireAdmin } from '../_guard';
+import { flushAfter } from '../_flush';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,7 +16,7 @@ export const dynamic = 'force-dynamic';
  * the UI needs to render the ready-to-deliver credentials card — including the
  * pre-filled WhatsApp deep link, so Muhammad Ibrahim can deliver in one tap.
  */
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const guard = requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
   const { admin } = guard;
@@ -78,4 +79,11 @@ export async function POST(req: Request) {
       whatsappNumber: result.user.whatsappNumber,
     },
   });
+}
+
+
+/* §3  Durability wrappers — see ../_flush.ts. */
+
+export async function POST(req: Request) {
+  return flushAfter(handlePost(req));
 }

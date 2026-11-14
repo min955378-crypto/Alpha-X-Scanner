@@ -4,6 +4,7 @@ import { SCANNER_BY_SLUG, type EntitlementKey, type ScannerSlug } from '@/lib/ty
 import { ALL_ENTITLEMENTS, getDb } from '@/server/engine/db';
 import { pushAccessUpdate } from '@/server/ws';
 import { isGuardError, requireAdmin } from '../_guard';
+import { flushAfter } from '../_flush';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -14,7 +15,7 @@ export const dynamic = 'force-dynamic';
  * Actions: create · toggle-entitlement · grant-full · suspend · reset-password
  *          · set-whatsapp · reset-devices · assign-key · mint-replacement-key
  */
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const guard = requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
   const { admin } = guard;
@@ -156,4 +157,11 @@ export async function POST(req: Request) {
   }
 
   return NextResponse.json({ ok: true });
+}
+
+
+/* §3  Durability wrappers — see ../_flush.ts. */
+
+export async function POST(req: Request) {
+  return flushAfter(handlePost(req));
 }
