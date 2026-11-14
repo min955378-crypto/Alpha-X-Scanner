@@ -5,12 +5,13 @@ import { getDb } from '@/server/engine/db';
 import { getEngine } from '@/server/engine';
 import { invalidateScanParams } from '@/server/engine/scanparams';
 import { isGuardError, requireAdmin } from '../_guard';
+import { flushAfter } from '../_flush';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /** §10 module 5 — Scanner math & parameter tuning, no redeploy required. */
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const guard = requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
   const { admin } = guard;
@@ -48,4 +49,11 @@ export async function POST(req: Request) {
   const rewarmed = getEngine().applyScannerConfig();
 
   return NextResponse.json({ ok: true, config: cfg, rewarmed });
+}
+
+
+/* §3  Durability wrappers — see ../_flush.ts. */
+
+export async function POST(req: Request) {
+  return flushAfter(handlePost(req));
 }

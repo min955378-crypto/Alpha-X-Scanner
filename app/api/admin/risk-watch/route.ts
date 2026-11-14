@@ -5,6 +5,7 @@ import { getDb } from '@/server/engine/db';
 import { getEngine } from '@/server/engine';
 import { refreshRiskWatch } from '@/server/engine/riskwatch';
 import { isGuardError, requireAdmin } from '../_guard';
+import { flushAfter } from '../_flush';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -32,7 +33,7 @@ export async function GET() {
   });
 }
 
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const guard = requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
   const { admin } = guard;
@@ -106,4 +107,11 @@ export async function POST(req: Request) {
     default:
       return NextResponse.json({ ok: false, error: 'BAD_ACTION' }, { status: 400 });
   }
+}
+
+
+/* §3  Durability wrappers — see ../_flush.ts. */
+
+export async function POST(req: Request) {
+  return flushAfter(handlePost(req));
 }
