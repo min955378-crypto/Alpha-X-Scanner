@@ -337,9 +337,19 @@ function seed(): DbShape {
     customSignals: [],
     coinOverrides: {},
     auditLogs: [],
-    secret: randomBytes(32).toString('hex'),
+    secret: SESSION_SECRET,
   };
 }
+
+/**
+ * §4  Session signing secret.
+ *
+ * The file-backed store persists a random secret on first boot, but a
+ * serverless deployment has no writable disk: every cold start would mint a new
+ * secret and invalidate every live session. `JWT_SECRET` pins it to a stable
+ * value across invocations.
+ */
+export const SESSION_SECRET: string = process.env.JWT_SECRET || randomBytes(32).toString('hex');
 
 function grantsFrom(e: Entitlements) {
   return {
@@ -397,7 +407,8 @@ class Database {
     this.riskItems = new Map((data.riskItems ?? []).map((r) => [r.id, r]));
     this.customSignals = new Map((data.customSignals ?? []).map((c) => [c.id, c]));
     this.auditLogs = data.auditLogs ?? [];
-    this.secret = data.secret || randomBytes(32).toString('hex');
+    /* Prefer the pinned env secret so sessions survive a serverless cold start. */
+    this.secret = SESSION_SECRET || data.secret || randomBytes(32).toString('hex');
     this.unlockedAllAt = data.unlockedAllAt ?? null;
 
     /* §2.2  Upgrade-in-place: any snapshot written before the "one key unlocks

@@ -44,6 +44,21 @@ export interface SniperChartProps {
   height?: number;
   /** Rendered by the parent above/below the canvas. */
   onHudChange?: (hud: BacktestHud) => void;
+  /**
+   * §1.2  Active scanner setup drawn as horizontal price lines on the main
+   * pane: ENTRY (blue), INVALIDATION/SL (red), TP1 and TP2 (emerald).
+   */
+  setup?: ChartSetup | null;
+}
+
+/** The four levels of a live scanner setup, as published by the engine. */
+export interface ChartSetup {
+  direction: 'LONG' | 'SHORT';
+  entry: number;
+  invalidation: number;
+  tp1: number;
+  tp2: number | null;
+  scannerSlug?: string;
 }
 
 export interface BacktestHud {
@@ -185,12 +200,15 @@ function toSeconds(ms: number): UTCTimestamp {
 /* Component                                                                   */
 /* -------------------------------------------------------------------------- */
 
-export function SniperChart({ candles, symbol, height = 460, onHudChange }: SniperChartProps) {
+export function SniperChart({ candles, symbol, height = 460, onHudChange, setup = null }: SniperChartProps) {
   const mainRef = useRef<HTMLDivElement | null>(null);
   const oscRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const oscChartRef = useRef<IChartApi | null>(null);
   const candleSeries = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const ema13Series = useRef<ISeriesApi<'Line'> | null>(null);
+  const ema34Series = useRef<ISeriesApi<'Line'> | null>(null);
+  const oscLineSeries = useRef<ISeriesApi<'Line'> | null>(null);
   const [hud, setHud] = useState<BacktestHud>({ trades: 0, win: 0, loss: 0, active: 0, winRate: null });
 
   const derived = useMemo(() => {
@@ -246,29 +264,10 @@ export function SniperChart({ candles, symbol, height = 460, onHudChange }: Snip
     });
     candleSeries.current = cs;
 
-    cs.setData(
-      candles.map((c) => ({
-        time: toSeconds(c.t),
-        open: c.o,
-        high: c.h,
-        low: c.l,
-        close: c.c,
-      })),
-    );
-
     const ema13 = chart.addLineSeries({ color: BULL_BODY, lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
-    ema13.setData(
-      candles
-        .map((c, i) => ({ time: toSeconds(c.t), value: derived.ema13[i] }))
-        .filter((p) => p.value !== undefined && Number.isFinite(p.value)),
-    );
-
+    ema13Series.current = ema13;
     const ema34 = chart.addLineSeries({ color: BEAR, lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
-    ema34.setData(
-      candles
-        .map((c, i) => ({ time: toSeconds(c.t), value: derived.ema34[i] }))
-        .filter((p) => p.value !== undefined && Number.isFinite(p.value)),
-    );
+    ema34Series.current = ema34;
 
     chart.timeScale().fitContent();
 
@@ -283,8 +282,73 @@ export function SniperChart({ candles, symbol, height = 460, onHudChange }: Snip
       chart.remove();
       chartRef.current = null;
       candleSeries.current = null;
+      ema13Series.current = null;
+      ema34Series.current = null;
     };
-  }, [candles, derived, height, symbol]);
+    /* Creation is deliberately independent of the data: the live kline socket
+       pushes a new bar every second, and tearing the chart down on each tick
+       would make the canvas visibly stutter. */
+  }, [height, symbol]);
+
+  /* Feed the existing series — cheap `setData`, no chart teardown. */
+  useEffect(() => {
+    if (!derived) return;
+    candleSeries.current?.setData(
+      candles.map((c) => ({
+        time: toSeconds(c.t),
+        open: c.o,
+        high: c.h,
+        low: c.l,
+        close: c.c,
+      })),
+    );
+    ema13Series.current?.setData(
+      candles
+        .map((c, i) => ({ time: toSeconds(c.t), value: derived.ema13[i] }))
+        .filter((p) => p.value !== undefined && Number.isFinite(p.value)),
+    );
+    ema34Series.current?.setData(
+      candles
+        .map((c, i) => ({ time: toSeconds(c.t), value: derived.ema34[i] }))
+        .filter((p) => p.value !== undefined && Number.isFinite(p.value)),
+    );
+  }, [candles, derived]);
+
+  /* §1.2  ENTRY / INVALIDATION / TP1 / TP2 horizontal levels. */
+  useEffect(() => {
+    const series = candleSeries.current;
+    if (!series || !setup) return;
+
+    const levels: Array<{ price: number; color: string; title: string }> = [
+      { price: setup.entry, color: '#3B82F6', title: 'ENTRY' },
+      { price: setup.invalidation, color: '#EF4444', title: 'SL' },
+      { price: setup.tp1, color: '#22C55E', title: 'TP1' },
+    ];
+    if (setup.tp2 !== null) levels.push({ price: setup.tp2, color: '#22C55E', title: 'TP2' });
+
+    const lines = levels
+      .filter((l) => Number.isFinite(l.price) && l.price > 0)
+      .map((l) =>
+        series.createPriceLine({
+          price: l.price,
+          color: l.color,
+          lineWidth: 1,
+          lineStyle: LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: `${l.title} ${setup.direction === 'LONG' ? '🟢' : '🔴'}`,
+        }),
+      );
+
+    return () => {
+      for (const line of lines) {
+        try {
+          series.removePriceLine(line);
+        } catch {
+          /* The series was torn down first — nothing left to clean up. */
+        }
+      }
+    };
+  }, [setup]);
 
   /* --------------------------- oscillator sub-pane -------------------------- */
   useEffect(() => {
@@ -303,11 +367,7 @@ export function SniperChart({ candles, symbol, height = 460, onHudChange }: Snip
     oscChartRef.current = osc;
 
     const line = osc.addLineSeries({ color: SNIPER, lineWidth: 2, priceLineVisible: false, lastValueVisible: true });
-    line.setData(
-      candles
-        .map((c, i) => ({ time: toSeconds(c.t), value: derived.sniper[i] ?? NaN }))
-        .filter((p) => Number.isFinite(p.value)),
-    );
+    oscLineSeries.current = line;
 
     /* 30–70 channel with the 50 midline. */
     for (const level of [30, 50, 70]) {
@@ -333,7 +393,18 @@ export function SniperChart({ candles, symbol, height = 460, onHudChange }: Snip
       ro.disconnect();
       osc.remove();
       oscChartRef.current = null;
+      oscLineSeries.current = null;
     };
+  }, [height]);
+
+  /* Feed the oscillator without rebuilding the pane. */
+  useEffect(() => {
+    if (!derived) return;
+    oscLineSeries.current?.setData(
+      candles
+        .map((c, i) => ({ time: toSeconds(c.t), value: derived.sniper[i] ?? NaN }))
+        .filter((p) => Number.isFinite(p.value)),
+    );
   }, [candles, derived]);
 
   /* Synchronise the two panes' visible ranges. */

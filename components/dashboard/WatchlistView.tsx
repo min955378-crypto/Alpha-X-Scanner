@@ -2,9 +2,10 @@
 
 import { useMemo } from 'react';
 
-import { formatPct, formatPrice, formatRsi, formatRvol, formatVolume, tradingViewLink } from '@/lib/format';
+import { formatPct, formatPrice, formatRsi, formatRvol, formatVolume } from '@/lib/format';
 import { zoneForRsi, type CoinSnapshot, type MarketFrame, type Timeframe } from '@/lib/types';
 import { useSettings } from '@/components/providers/SettingsProvider';
+import { useOpenCoinChart } from '@/components/chart/ChartDrawer';
 import { CopyButton } from '@/components/ui';
 
 /** §6.6  Watchlist (★) view — the same metrics as the Pro Table, filtered. */
@@ -80,6 +81,7 @@ function WatchRow({
   timeframe: Timeframe;
   onUnwatch: () => void;
 }) {
+  const openCoin = useOpenCoinChart();
   const zone = zoneForRsi(coin.rsi);
   return (
     <tr className="border-b border-white/[0.03] hover:bg-bg-hover">
@@ -99,12 +101,15 @@ function WatchRow({
       <td className="px-2 py-1.5">
         <div className="flex items-center justify-end gap-1">
           <a
-            href={tradingViewLink(coin.baseAsset, timeframe)}
-            target="_blank"
-            rel="noopener noreferrer"
+            href={`/chart/${coin.baseAsset}?tf=${timeframe}`}
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+              e.preventDefault();
+              openCoin(coin, timeframe);
+            }}
             className="rounded border border-white/10 px-1.5 py-0.5 text-[9.5px] text-text-secondary hover:text-white"
           >
-            Chart ↗
+            Chart
           </a>
           <CopyButton value={coin.symbol} label="symbol" compact />
           <button

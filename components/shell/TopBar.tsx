@@ -20,7 +20,7 @@ import { useMarket } from '@/components/providers/MarketProvider';
 export function TopBar() {
   const { user, systemConfig, logout } = useAuth();
   const { settings } = useSettings();
-  const { status, dataMode } = useMarket();
+  const { status, dataMode, streamLive } = useMarket();
   const router = useRouter();
   const pathname = usePathname();
   const [now, setNow] = useState<Date | null>(null);
@@ -42,7 +42,9 @@ export function TopBar() {
 
   const connectionLabel =
     status === 'connected'
-      ? 'Connected'
+      ? streamLive
+        ? 'Connected · Live'
+        : 'Connected'
       : status === 'cached'
         ? 'Cached (Reconnecting...)'
         : status === 'connecting'

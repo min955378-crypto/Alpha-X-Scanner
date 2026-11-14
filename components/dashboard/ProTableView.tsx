@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import {useCallback, useMemo, useState} from 'react';
 
 import { formatFunding, formatPct, formatPrice, formatRsi, formatRvol, formatVolume, levelCopyValue, tradingViewLink } from '@/lib/format';
 import { formatFullVolume } from '@/lib/format';
 import { useSettings } from '@/components/providers/SettingsProvider';
+import { useOpenCoinChart } from '@/components/chart/ChartDrawer';
 import { useMarket } from '@/components/providers/MarketProvider';
 import { useTickFlash } from '@/components/ui/Motion3D';
 import { Icon, type IconName } from '@/components/ui/Icons';
@@ -61,6 +62,7 @@ const QUICK_FILTERS: Array<{ id: QuickFilter; label: string }> = [
 ];
 
 export function ProTableView({ frame, timeframe }: { frame: MarketFrame | null; timeframe: Timeframe }) {
+  const openCoin = useOpenCoinChart();
   const { settings, toggleWatch, isWatched } = useSettings();
   const { livePrices, tickVersion } = useMarket();
 
@@ -263,6 +265,7 @@ export function ProTableView({ frame, timeframe }: { frame: MarketFrame | null; 
                       timeframe={timeframe}
                       watched={isWatched(coin.symbol)}
                       onWatch={() => toggleWatch(coin.symbol)}
+                      onOpen={() => openCoin(coin, timeframe)}
                       livePrice={livePrices?.current.get(coin.symbol)?.[0]}
                       volumeFormat={settings.volumeFormat}
                     />
@@ -292,6 +295,7 @@ function ProTableRow({
   timeframe,
   watched,
   onWatch,
+  onOpen,
   livePrice,
   volumeFormat,
 }: {
@@ -301,6 +305,7 @@ function ProTableRow({
   timeframe: Timeframe;
   watched: boolean;
   onWatch: () => void;
+  onOpen: () => void;
   livePrice: number | undefined;
   volumeFormat: 'ABBREVIATED' | 'FULL';
 }) {
@@ -314,7 +319,12 @@ function ProTableRow({
     <div
       role="row"
       style={{ top, height: ROW_H }}
-      className={`absolute left-0 right-0 flex items-center border-b border-white/[0.03] text-[11.5px] hover:bg-bg-hover ${
+      onClick={(e) => {
+        /* Ignore clicks that landed on a control inside the row. */
+        if ((e.target as HTMLElement).closest('button, a')) return;
+        onOpen();
+      }}
+      className={`absolute left-0 right-0 flex cursor-pointer items-center border-b border-white/[0.03] text-[11.5px] hover:bg-bg-hover ${
         watched ? 'bg-amber-500/[0.04]' : ''
       }`}
     >

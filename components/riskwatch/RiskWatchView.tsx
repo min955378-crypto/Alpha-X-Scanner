@@ -8,6 +8,7 @@ import { useAuth } from '@/components/providers/AuthProvider';
 import { useSettings } from '@/components/providers/SettingsProvider';
 import { useToast } from '@/components/providers/ToastProvider';
 import { Pill } from '@/components/ui';
+import { useOpenSymbolChart } from '@/components/chart/ChartDrawer';
 import { TiltCard } from '@/components/ui/Motion3D';
 
 /**
@@ -280,6 +281,10 @@ function RiskColumn({
 }
 
 function RiskRow({ item, title, tz }: { item: RiskWatchItem; title: string; tz: string }) {
+  const openSymbol = useOpenSymbolChart();
+  /* §1.1  Monitoring-tag coins open the native chart; news/delisting rows keep
+     their external announcement link. */
+  const chartable = item.category === 'MONITORING_TAG' && Boolean(item.symbol);
   const badgeTone =
     item.badgeType === 'Monitoring'
       ? 'amber'
@@ -287,21 +292,26 @@ function RiskRow({ item, title, tz }: { item: RiskWatchItem; title: string; tz: 
         ? 'purple'
         : 'red';
 
-  const href =
-    item.category === 'MONITORING_TAG'
-      ? `https://www.tradingview.com/chart/?symbol=BINANCE:${item.symbol}USDT&interval=60`
-      : item.sourceUrl;
+  const href = chartable ? `/chart/${item.symbol!.replace(/USDT$/i, '')}?tf=1H` : item.sourceUrl;
 
-  const sub =
-    item.category === 'MONITORING_TAG'
-      ? 'Open TradingView · 1H'
-      : `Published ${formatDateShort(item.publishedAt, tz)} · Open announcement ↗`;
+  const sub = chartable
+    ? 'Open live chart · 1H'
+    : `Published ${formatDateShort(item.publishedAt, tz)} · Open announcement ↗`;
 
   return (
     <a
       href={href}
-      target="_blank"
-      rel="noopener noreferrer"
+      target={chartable ? undefined : '_blank'}
+      rel={chartable ? undefined : 'noopener noreferrer'}
+      onClick={
+        chartable
+          ? (e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+              e.preventDefault();
+              openSymbol(item.symbol!, '1H');
+            }
+          : undefined
+      }
       className="flex items-center justify-between gap-2 rounded border border-white/[0.05] bg-white/[0.02] px-2 py-1.5 transition-colors hover:border-white/15 hover:bg-white/[0.05]"
     >
       <div className="min-w-0">
