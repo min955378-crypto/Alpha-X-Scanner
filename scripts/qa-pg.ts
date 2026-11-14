@@ -14,6 +14,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
 interface Recorded {
@@ -229,7 +230,11 @@ async function main(): Promise<void> {
   /* SUPABASE_URL is read once at module load — correct in production, where
      env is fixed for the process lifetime — so the disabled path can only be
      observed in a fresh process that never had it set. */
-  const clean = spawnSync('npx', ['tsx', 'scripts/qa-pg.ts'], {
+  /* Invoke the workspace-local tsx binary directly rather than `npx`: npx has
+     to resolve the package first, which on a cold node_modules is slow enough
+     to make this check intermittently fail. */
+  const tsx = join(process.cwd(), 'node_modules', '.bin', 'tsx');
+  const clean = spawnSync(tsx, ['scripts/qa-pg.ts'], {
     cwd: process.cwd(),
     env: {
       PATH: process.env.PATH,
@@ -238,12 +243,15 @@ async function main(): Promise<void> {
       QA_PG_PROBE: '1',
     },
     encoding: 'utf8',
+    timeout: 120_000,
   });
   const probe = /PROBE:(true|false)/.exec(clean.stdout ?? '');
   check(
     'pgEnabled() false when SUPABASE_URL is unset',
     probe?.[1] === 'false',
-    probe ? probe[1] : `no probe output: ${(clean.stderr ?? '').trim().split('\n').slice(-1)[0]}`,
+    probe
+      ? probe[1]
+      : `no probe output (status ${clean.status}): ${(clean.stderr ?? '').trim().split('\n').slice(-1)[0]}`,
   );
   check(
     'unconfigured flush is a no-op, not an error',
