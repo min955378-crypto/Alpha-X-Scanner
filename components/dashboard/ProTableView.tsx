@@ -1,11 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { formatFunding, formatPct, formatPrice, formatRsi, formatRvol, formatVolume, levelCopyValue, tradingViewLink } from '@/lib/format';
 import { formatFullVolume } from '@/lib/format';
 import { useSettings } from '@/components/providers/SettingsProvider';
 import { useMarket } from '@/components/providers/MarketProvider';
+import { useTickFlash } from '@/components/ui/Motion3D';
+import { Icon, type IconName } from '@/components/ui/Icons';
 import { CopyButton, Pill } from '@/components/ui';
 import { zoneForRsi } from '@/lib/types';
 import type { CoinSnapshot, MarketFrame, ObStatus, EmaStatus, Timeframe } from '@/lib/types';
@@ -17,8 +19,15 @@ const VIEWPORT_H = 600;
 type SortKey = 'rank' | 'symbol' | 'price' | 'changePct24h' | 'rsi' | 'quoteVol24h' | 'rvol' | 'spreadPct' | 'fundingRatePct' | 'score' | 'obStatus' | 'emaStatus';
 
 /** §6.4  Complete 14-column specification. */
-const COLUMNS: Array<{ key: string; label: string; width: number; align: 'left' | 'right' | 'center'; sort?: SortKey }> = [
-  { key: 'star', label: '★', width: 32, align: 'center' },
+const COLUMNS: Array<{
+  key: string;
+  label: string;
+  width: number;
+  align: 'left' | 'right' | 'center';
+  sort?: SortKey;
+  icon?: IconName;
+}> = [
+  { key: 'star', label: 'Watch', icon: 'star' as IconName, width: 32, align: 'center' },
   { key: 'rank', label: '#', width: 40, align: 'right' },
   { key: 'symbol', label: 'Coin', width: 155, align: 'left', sort: 'symbol' },
   { key: 'price', label: 'Price', width: 110, align: 'right', sort: 'price' },
@@ -149,7 +158,7 @@ export function ProTableView({ frame, timeframe }: { frame: MarketFrame | null; 
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `scalppro-pro-table-${timeframe}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `alpha-x-scanner-pro-table-${timeframe}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }, [rows, timeframe]);
@@ -218,10 +227,17 @@ export function ProTableView({ frame, timeframe }: { frame: MarketFrame | null; 
                   className={`shrink-0 px-2 ${c.align === 'right' ? 'text-right' : c.align === 'center' ? 'text-center' : 'text-left'}`}
                 >
                   {c.sort ? (
-                    <button type="button" onClick={() => toggleSort(c.sort)} className="hover:text-white">
-                      {c.label}
-                      {sortKey === c.sort ? <span aria-hidden="true">{sortDir === 'desc' ? ' ▾' : ' ▴'}</span> : null}
+                    <button
+                      type="button"
+                      onClick={() => toggleSort(c.sort)}
+                      className="inline-flex items-center gap-1 hover:text-white"
+                    >
+                      {c.icon ? <Icon name={c.icon} size={12} /> : c.label}
+                      {c.icon ? <span className="sr-only">{c.label}</span> : null}
+                      {sortKey === c.sort ? <Icon name={sortDir === 'desc' ? 'chevronDown' : 'chevronUp'} size={12} /> : null}
                     </button>
+                  ) : c.icon ? (
+                    <Icon name={c.icon} size={12} aria-label={c.label} role="img" />
                   ) : (
                     c.label
                   )}
@@ -289,7 +305,7 @@ function ProTableRow({
   volumeFormat: 'ABBREVIATED' | 'FULL';
 }) {
   const price = livePrice ?? coin.price;
-  const flash = usePriceFlash(price);
+  const flash = useTickFlash(price);
 
   const zone = zoneForRsi(coin.rsi);
   const rangePct = coin.high24h > coin.low24h ? ((price - coin.low24h) / (coin.high24h - coin.low24h)) * 100 : 50;
@@ -438,26 +454,6 @@ function ProTableRow({
       </div>
     </div>
   );
-}
-
-/**
- * §6.4 col 4 — flash the price cell green/red for 600ms on every tick.
- * Driven by an effect (not render) so React 18 StrictMode stays honest.
- */
-function usePriceFlash(price: number): string {
-  const lastRef = useRef<number | null>(null);
-  const [flash, setFlash] = useState<'up' | 'down' | null>(null);
-
-  useEffect(() => {
-    const prev = lastRef.current;
-    lastRef.current = price;
-    if (prev === null || prev === price) return;
-    setFlash(price > prev ? 'up' : 'down');
-    const t = setTimeout(() => setFlash(null), 600);
-    return () => clearTimeout(t);
-  }, [price]);
-
-  return flash === 'up' ? 'animate-flash-up' : flash === 'down' ? 'animate-flash-down' : '';
 }
 
 /**

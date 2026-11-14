@@ -38,7 +38,7 @@ import {
  */
 
 const DATA_DIR = join(process.cwd(), '.data');
-const DB_FILE = join(DATA_DIR, 'scalppro-db.json');
+const DB_FILE = join(DATA_DIR, 'alpha-x-scanner-db.json');
 
 export interface UserRecord {
   id: string;
@@ -123,7 +123,7 @@ export function generateLicenseKey(): string {
     Array.from(randomBytes(4))
       .map((b) => KEY_ALPHABET[b % KEY_ALPHABET.length])
       .join('');
-  return `SPRO-${block()}-${block()}-${block()}`;
+  return `APS-${block()}-${block()}-${block()}`;
 }
 
 /* ------------------------------- seed data -------------------------------- */
@@ -181,7 +181,7 @@ function seed(): DbShape {
 
   const ultraPro: LicenseRecord = {
     id: randomUUID(),
-    keyString: 'SPRO-9F4A-22C1-88E0',
+    keyString: 'APS-9F4A-22C1-88E0',
     status: 'ACTIVE',
     plan: 'ULTRA_PRO',
     durationDays: 3650,
@@ -196,7 +196,7 @@ function seed(): DbShape {
 
   const trial: LicenseRecord = {
     id: randomUUID(),
-    keyString: 'SPRO-TRIAL-AA17-K4M2',
+    keyString: 'APS-TRIAL-AA17-K4M2',
     status: 'ACTIVE',
     plan: 'LITE',
     durationDays: 7,
@@ -213,8 +213,8 @@ function seed(): DbShape {
     id: randomUUID(),
     username: 'admin',
     email: null,
-    passwordHash: hashPassword('ScalpPro@2026'),
-    whatsappNumber: '+923164404787',
+    passwordHash: hashPassword('AlphaX@2026'),
+    whatsappNumber: '0348-5581969',
     role: 'ADMIN',
     plan: 'ULTRA_PRO',
     isSuspended: false,
@@ -488,7 +488,7 @@ class Database {
   }
 }
 
-const GLOBAL_KEY = '__scalppro_db__';
+const GLOBAL_KEY = '__alpha_x_db__';
 
 export function getDb(): Database {
   const g = globalThis as unknown as Record<string, Database | undefined>;

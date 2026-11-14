@@ -8,6 +8,7 @@ import { useAuth } from '@/components/providers/AuthProvider';
 import { useSettings } from '@/components/providers/SettingsProvider';
 import { useToast } from '@/components/providers/ToastProvider';
 import { Pill } from '@/components/ui';
+import { TiltCard } from '@/components/ui/Motion3D';
 
 /**
  * §8  Tab 7 — Binance Risk Watch.
@@ -197,12 +198,18 @@ export function RiskWatchView() {
 
 function KpiCard({ value, label, color }: { value: number; label: string; color: string }) {
   return (
-    <div className="card flex flex-col items-center justify-center py-3" style={{ borderBottom: `2px solid ${color}` }}>
-      <div className="text-[26px] font-extrabold leading-none" style={{ color }}>
-        {value}
+    /* §Phase 2 §2.3 — 3D tilt + cursor spotlight on all 4 Binance Risk Watch KPI cards. */
+    <TiltCard max={6} className="rounded-lg">
+      <div
+        className="card flex h-full flex-col items-center justify-center py-3"
+        style={{ borderBottom: `2px solid ${color}` }}
+      >
+        <div className="mono-num text-[26px] font-extrabold leading-none" style={{ color }}>
+          {value}
+        </div>
+        <div className="mt-1 text-[10.5px] font-semibold text-text-secondary">{label}</div>
       </div>
-      <div className="mt-1 text-[10.5px] font-semibold text-text-secondary">{label}</div>
-    </div>
+    </TiltCard>
   );
 }
 

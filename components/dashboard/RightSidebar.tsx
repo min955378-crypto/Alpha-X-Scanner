@@ -7,10 +7,11 @@ import { formatPct, tradingViewLink } from '@/lib/format';
 import { SCANNERS, TIMEFRAMES, type MarketFrame, type Timeframe } from '@/lib/types';
 import { useSettings } from '@/components/providers/SettingsProvider';
 import { useMarket } from '@/components/providers/MarketProvider';
+import { Icon } from '@/components/ui/Icons';
 
 /**
  * §6.6  Right sidebar (190px): Top Movers · Active Scanners · Chart Settings ·
- * Freedom With Aahad promo card.
+ * Muhammad Ibrahim promo card.
  */
 export function RightSidebar({ frame }: { frame: MarketFrame | null }) {
   const { settings, update } = useSettings();
@@ -59,7 +60,7 @@ export function RightSidebar({ frame }: { frame: MarketFrame | null }) {
 
       {/* ⚙ Active Scanners */}
       <div className="card p-2.5">
-        <h3 className="mb-2 text-[12px] font-bold text-white">⚙ Active Scanners</h3>
+        <h3 className="mb-2 flex items-center gap-1.5 text-[12px] font-bold text-white"><Icon name="bolt" size={13} className="text-emerald-400" /> Active Scanners</h3>
         <ul className="space-y-1.5 text-[11.5px]">
           {SCANNERS.map((s) => (
             <li key={s.slug} className="flex items-center justify-between gap-2">
@@ -74,7 +75,7 @@ export function RightSidebar({ frame }: { frame: MarketFrame | null }) {
 
       {/* ⚙ Chart Settings */}
       <div className="card space-y-2 p-2.5">
-        <h3 className="text-[12px] font-bold text-white">⚙ Chart Settings</h3>
+        <h3 className="flex items-center gap-1.5 text-[12px] font-bold text-white"><Icon name="settings" size={13} className="text-emerald-400" /> Chart Settings</h3>
         <label className="block text-[10.5px] text-text-secondary" htmlFor="tv-tf">
           TradingView Timeframe
         </label>
@@ -100,7 +101,7 @@ export function RightSidebar({ frame }: { frame: MarketFrame | null }) {
         {saved ? <div className="text-center text-[10px] font-semibold text-emerald-400">Saved ✓</div> : null}
       </div>
 
-      {/* Freedom With Aahad promo card */}
+      {/* Muhammad Ibrahim promo card */}
       <div className="card space-y-2 p-3 text-center">
         <Equalizer />
         <div className="text-[12px] font-bold text-white">{BRAND.promoHeadline}</div>
@@ -119,7 +120,7 @@ export function RightSidebar({ frame }: { frame: MarketFrame | null }) {
 
       {/* Live price sample — proves the 1 Hz tick overlay is wired up. */}
       <div className="card p-2.5" key={tickVersion}>
-        <h3 className="mb-2 text-[12px] font-bold text-white">⚡ Live Ticks</h3>
+        <h3 className="mb-2 flex items-center gap-1.5 text-[12px] font-bold text-white"><Icon name="activity" size={13} className="text-emerald-400" /> Live Ticks</h3>
         <ul className="mono-num space-y-1 text-[11px]">
           {movers.slice(0, 3).map((m) => {
             const live = livePrices.current.get(m.symbol);
@@ -139,7 +140,7 @@ export function RightSidebar({ frame }: { frame: MarketFrame | null }) {
 /** Scanner running state is owned by each scanner page; the sidebar mirrors it. */
 function scannerRunning(slug: string): boolean {
   if (typeof window === 'undefined') return false;
-  return window.sessionStorage.getItem(`scalppro:scanner:${slug}`) === 'running';
+  return window.sessionStorage.getItem(`alpha-x-scanner:scanner:${slug}`) === 'running';
 }
 
 /** 5-bar animated equalizer from the promo card ([SEEN IN VIDEO]). */

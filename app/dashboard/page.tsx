@@ -47,7 +47,7 @@ function DashboardInner() {
 
   // Keep the engine's active timeframe in step with the user's saved default.
   useEffect(() => {
-    if (hydrated) document.title = 'ScalpPro v2 — Dashboard';
+    if (hydrated) document.title = 'Alpha X Scanner — Dashboard';
   }, [hydrated]);
 
   return (
@@ -60,7 +60,7 @@ function DashboardInner() {
             onChange={setView}
             options={[
               { value: 'HEATMAP', label: '🔥 Heatmap' },
-              { value: 'PRO_TABLE', label: '📋 Pro Table' },
+              { value: 'PRO_TABLE', label: 'Pro Table' },
               { value: 'COIN_FINDER', label: '🔍 Coin Finder' },
               { value: 'WATCHLIST', label: '★ Watchlist' },
             ]}
@@ -83,7 +83,7 @@ function DashboardSkeleton() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-bg-canvas">
       <div className="text-center">
-        <div className="text-[18px] font-bold text-white">ScalpPro</div>
+        <div className="text-[18px] font-bold text-white">Alpha X Scanner</div>
         <div className="mt-1 text-[11px] text-text-muted">Loading your terminal…</div>
       </div>
     </div>

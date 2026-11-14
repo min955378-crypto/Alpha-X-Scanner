@@ -3,9 +3,9 @@ import type { Metadata, Viewport } from 'next';
 import { Providers } from './providers';
 import './globals.css';
 
-/** §1.1  Document title is [LIVE-VERIFIED]: "ScalpPro v2 — Login". */
+/** §1.1  Document title is [LIVE-VERIFIED]: "Alpha X Scanner — Login". */
 export const metadata: Metadata = {
-  title: 'ScalpPro v2 — Login',
+  title: 'Alpha X Scanner — Login',
   description: 'Smart Binance Coin Finder — RSI Heatmap, 5 scanners and Binance Risk Watch on one terminal.',
   robots: { index: false, follow: false },
 };
@@ -20,12 +20,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className="dark">
       <head>
-        {/* §3.1  Google Fonts: Inter + IBM Plex Sans (UI), JetBrains Mono (numbers),
-            Noto Nastaliq Urdu (disclaimers & glossary). */}
+        {/* §5.1  Three-tier pairing: Space Grotesk (display) · Plus Jakarta Sans
+            (UI) · JetBrains Mono (tabular financial data). */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
-          href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Nastaliq+Urdu:wght@400;700&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&family=Noto+Nastaliq+Urdu:wght@400;700&display=swap"
           rel="stylesheet"
         />
       </head>

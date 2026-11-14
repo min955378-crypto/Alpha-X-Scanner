@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 
 import { formatClock, formatCountdown } from '@/lib/format';
 import { BRAND } from '@/lib/constants';
 import { ZONES, type MarketFrame, type Timeframe, type ZoneId } from '@/lib/types';
 import { Segmented } from '@/components/ui';
 import { useSettings } from '@/components/providers/SettingsProvider';
+import { Icon } from '@/components/ui/Icons';
 
 /**
  * §6.1  Three-part top header strip:
@@ -52,7 +53,7 @@ export function HeatmapHeader({
       {/* 2 — Heatmap header */}
       <div className="min-w-[280px] flex-1 space-y-1.5 text-center">
         <div className="flex flex-wrap items-center justify-center gap-2">
-          <span className="text-[14px] font-bold text-white">📊 RSI Heatmap</span>
+          <span className="inline-flex items-center gap-1.5 text-[14px] font-bold text-white"><Icon name="layers" size={15} className="text-emerald-400" /> RSI Heatmap</span>
           <span className="flex items-center gap-1 rounded border border-emerald-500/50 bg-emerald-500/20 px-1.5 py-0.5 text-[9px] font-bold text-emerald-400">
             <span className="h-1.5 w-1.5 animate-ping rounded-full bg-emerald-400" />
             LIVE
@@ -97,16 +98,19 @@ export function HeatmapHeader({
             <button
               type="button"
               onClick={onJumpToSpotlight}
-              className="rounded border border-orange-500/40 bg-orange-500/15 px-2 py-0.5 text-orange-300 hover:border-orange-400"
+              className="laser-border relative inline-flex items-center gap-1 rounded border border-orange-500/40 bg-orange-500/15 px-2 py-0.5 text-orange-300 hover:border-orange-400"
+              style={{ '--laser-color': '#F97316' } as CSSProperties}
               title="Highlight and scroll to this coin"
             >
-              🟧 RSI 52-55 Rising:{' '}
-              <strong className="text-white">{frame.spotlight.baseAsset}</strong> RSI:
-              {frame.spotlight.rsi.toFixed(1)}
+              <Icon name="spark" size={12} />
+              <span>RSI 52-55 Rising:</span>{' '}
+              <strong className="text-white">{frame.spotlight.baseAsset}</strong>
+              <span className="mono-num">RSI {frame.spotlight.rsi.toFixed(1)}</span>
             </button>
           ) : (
-            <span className="rounded border border-white/10 bg-white/[0.03] px-2 py-0.5 text-text-muted">
-              🟧 RSI 52-55 Rising: scanning…
+            <span className="inline-flex items-center gap-1 rounded border border-white/10 bg-white/[0.03] px-2 py-0.5 text-text-muted">
+              <Icon name="spark" size={12} />
+              RSI 52-55 Rising: scanning…
             </span>
           )}
         </div>

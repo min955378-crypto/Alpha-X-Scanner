@@ -47,11 +47,11 @@ interface Overview {
 }
 
 const MODULES = [
-  { id: 'overview', label: '📊 Overview' },
+  { id: 'overview', label: 'Overview' },
   { id: 'users', label: '👥 Users' },
   { id: 'licenses', label: '🔑 Licenses' },
   { id: 'coins', label: '🪙 Coins' },
-  { id: 'scanners', label: '⚙ Scanner Math' },
+  { id: 'scanners', label: 'Scanner Math' },
   { id: 'risk', label: '⚠ Risk Watch' },
   { id: 'branding', label: '📢 Branding' },
 ] as const;
@@ -376,7 +376,7 @@ function LicensesModule({ data, mutate }: { data: Overview; mutate: (u: string, 
   const [generated, setGenerated] = useState<string[]>([]);
 
   const welcome = (key: string) =>
-    `Assalam-o-Alaikum! Your ScalpPro access is ready.\nLicense Key: ${key}\nUsername: <set by you>\nOpen: https://scalp-usdt.com/login\nWatch the 2-click login guide: https://www.youtube.com/watch?v=AOtweJ-XWbk\n— Freedom With Aahad (${BRAND.whatsappContact})`;
+    `Assalam-o-Alaikum! Your Alpha X Scanner access is ready.\nLicense Key: ${key}\nUsername: <set by you>\nOpen: https://alpha-x-scanner.com/login\nWatch the 2-click login guide: https://www.youtube.com/watch?v=AOtweJ-XWbk\n— Muhammad Ibrahim (${BRAND.whatsappContact})`;
 
   return (
     <div className="space-y-3">
@@ -412,7 +412,7 @@ function LicensesModule({ data, mutate }: { data: Overview; mutate: (u: string, 
           }}
           className="btn-green"
         >
-          ⚡ Generate keys
+          Generate keys
         </button>
 
         {generated.length > 0 ? (

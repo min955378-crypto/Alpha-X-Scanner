@@ -121,7 +121,7 @@ export function CoinFinderView({ frame, timeframe }: { frame: MarketFrame | null
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `scalppro-coin-finder-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `alpha-x-scanner-coin-finder-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }, [results]);

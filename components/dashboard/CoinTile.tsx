@@ -3,6 +3,7 @@
 import { memo } from 'react';
 
 import { formatPct, formatRsi } from '@/lib/format';
+import { useTickFlash } from '@/components/ui/Motion3D';
 import { DENSITY } from '@/lib/constants';
 import type { CoinSnapshot, Timeframe, ZoneDef } from '@/lib/types';
 
@@ -37,6 +38,8 @@ export const CoinTile = memo(function CoinTile({
     : { background: zone.cssBg, borderColor: zone.cssBorder };
 
   const positive = coin.changePct24h >= 0;
+  // §Phase 2 §2.4 — 600ms radial pulse whenever the live price ticks.
+  const pulse = useTickFlash(coin.price);
 
   return (
     <a
@@ -57,9 +60,9 @@ export const CoinTile = memo(function CoinTile({
       )}, 24h change ${formatPct(coin.changePct24h)}`}
       title={`${coin.baseAsset} · RSI ${formatRsi(coin.rsi)}${warn ? ' · ⚠ Monitoring Tag' : ''}`}
       style={{ width: d.tileW, height: d.tileH, ...style }}
-      className={`zone-tile shrink-0 hover:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-amber-400 ${
+      className={`zone-tile shrink-0 rounded-md hover:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-amber-400 ${
         highlighted ? 'ring-2 ring-amber-400' : ''
-      }`}
+      } ${pulse}`}
     >
       <span
         style={{ fontSize: d.symbol }}

@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   wireEngineBroadcast();
 
   server.listen(port, hostname, () => {
-    console.log(`\n  ▲ ScalpPro v2 ready on http://${hostname}:${port}`);
+    console.log(`\n  ▲ Alpha X Scanner ready on http://${hostname}:${port}`);
     console.log(`  ▸ WebSocket data plane:  /ws/market`);
     void getEngine().start().then(() => {
       console.log(`  ▸ Quant worker online in ${getEngine().dataMode} mode\n`);

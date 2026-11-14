@@ -1,5 +1,5 @@
 /**
- * §15.2  Live acceptance check against a running ScalpPro server.
+ * §15.2  Live acceptance check against a running Alpha X Scanner server.
  *
  *   npm run dev            # in one shell
  *   npm run qa:frame       # in another (waits for Phase B automatically)
@@ -37,7 +37,7 @@ const sd = (a: number[]) => {
 };
 
 async function main() {
-  console.log(`ScalpPro live acceptance check → ${BASE}\n`);
+  console.log(`Alpha X Scanner live acceptance check → ${BASE}\n`);
   await waitForPhaseB();
 
   const health = await fetch(`${BASE}/api/market/health`).then((x) => x.json());

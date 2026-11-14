@@ -5,30 +5,116 @@ import type { CarouselSlide, SystemConfig, Timeframe } from './types';
 /* -------------------------------------------------------------------------- */
 
 export const BRAND = {
-  productName: 'ScalpPro',
-  domain: 'https://scalp-usdt.com',
-  loginTitle: 'ScalpPro v2 — Login',
+  productName: 'Alpha X Scanner',
+  domain: 'https://alpha-x-scanner.com',
+  loginTitle: 'Alpha X Scanner — Institutional Crypto Terminal',
   loginSubtitle: 'Smart Binance Coin Finder',
-  brandWatermark: 'FreedomWthAahad',
-  promoHeadline: 'Freedom With Aahad',
+  brandWatermark: 'Muhammad Ibrahim',
+  promoHeadline: 'Muhammad Ibrahim',
   promoTagline: 'Protect your capital and let quality setups come to you.',
-  whatsappContact: '+923164404787',
-  whatsappHref: 'https://wa.me/923164404787',
+  whatsappContact: '0348-5581969',
+  /** §1.3  Single canonical WhatsApp deep link — pre-filled purchase request. */
+  whatsappHref:
+    'https://wa.me/923485581969?text=Assalam-o-Alaikum%20Muhammad%20Ibrahim!%20I%20visited%20Alpha%20X%20Scanner%20and%20want%20to%20purchase%20a%20License%20Key%20for%20Ultra%20Pro%20access.%20Please%20share%20the%20details.',
   defaultVersionBadge: 'Lite v1.2.8',
 } as const;
 
 /** §1.2  Verbatim legal disclosures — rendered on every page footer. */
 export const LEGAL_EN =
-  'ScalpPro is an independent educational tool created by Freedom With Aahad. It has no official affiliation with, and is not endorsed by, Freedom With Nomi. Educational purpose only — this is not financial advice. Crypto trading carries a substantial risk of loss, and no scanner, indicator, or signal guarantees a profit. Monitoring Tag is a risk warning, not confirmation of delisting. Always open the official Binance notice before making a decision.';
+  'Alpha X Scanner is an independent educational tool created by Muhammad Ibrahim. Educational purpose only — this is not financial advice. Crypto trading carries a substantial risk of loss, and no scanner, indicator, or signal guarantees a profit. Monitoring Tag is a risk warning, not confirmation of delisting. Always open the official Binance notice before making a decision.';
 
 export const LEGAL_UR =
-  'یہ ٹول صرف تعلیمی مقصد کے لیے ہے، یہ مالی مشورہ نہیں ہے۔ کرپٹو ٹریڈنگ میں نقصان کا خطرہ ہے۔ کسی بھی سگنل یا اسکینر سے منافع کی ضمانت نہیں۔ ScalpPro ایک خودمختار ٹول ہے جس کا Freedom With Nomi سے کوئی سرکاری تعلق نہیں ہے۔';
+  'یہ ٹول صرف تعلیمی مقصد کے لیے ہے، یہ مالی مشورہ نہیں ہے۔ کرپٹو ٹریڈنگ میں نقصان کا خطرہ ہے۔ کسی بھی سگنل یا اسکینر سے منافع کی ضمانت نہیں۔ Alpha X Scanner ایک خودمختار ٹول ہے۔';
 
-/** §1.1 / §11.1  Official FreedomWthAahad tutorial videos — [LIVE-VERIFIED]. */
+/** §3.2  The 12 platform capabilities shown on the login gate — verbatim copy. */
+export interface LoginFeature {
+  id: string;
+  title: string;
+  body: string;
+  /** Icon key from components/ui/Icons. */
+  icon: 'search' | 'layers' | 'spark' | 'bolt' | 'blocks' | 'trending' | 'hidden' | 'crosshair' | 'shieldAlert' | 'activity' | 'candles' | 'volume';
+}
+
+export const LOGIN_FEATURES: LoginFeature[] = [
+  {
+    id: 'scanner',
+    title: 'Smart Binance USDT Coin Scanner',
+    body: 'Real-time institutional scanning across 600+ Binance USDT spot pairs on a single unified terminal.',
+    icon: 'search',
+  },
+  {
+    id: 'heatmap',
+    title: 'Live 6-Zone RSI Heatmap',
+    body: 'Instant visual categorization from 10–20 Extreme and 20–30 Oversold up to 50–60 V1 Zone and 60+ Gainers.',
+    icon: 'layers',
+  },
+  {
+    id: 'spotlight',
+    title: 'RSI 52–55 Rising Momentum Spotlight',
+    body: 'Automatically isolates the strongest accelerating coin inside the RSI 52–55 sweet spot every 60 seconds.',
+    icon: 'spark',
+  },
+  {
+    id: 'v1',
+    title: 'V1 Scaling Momentum Scanner',
+    body: 'High-RVOL breakout and momentum continuation screening in the RSI 50–60 zone.',
+    icon: 'bolt',
+  },
+  {
+    id: 'order-block',
+    title: 'Institutional Order Block Scanner',
+    body: 'Detects unmitigated Bullish Demand and Bearish Supply order blocks with BOS & FVG validation.',
+    icon: 'blocks',
+  },
+  {
+    id: 'ema',
+    title: 'EMA Crossover & Pullback Scanner',
+    body: 'Tracks fast/slow EMA stack alignment, fresh crossovers, and dynamic trend pullback re-entries.',
+    icon: 'trending',
+  },
+  {
+    id: 'hidden-bull',
+    title: 'Hidden Bullish & ICT Scanner',
+    body: '3-stage confirmation pipeline (Potential → Waiting → BUY) inside the RSI 30–40 zone.',
+    icon: 'hidden',
+  },
+  {
+    id: 'sniper',
+    title: 'Alpha Sniper & 500-Candle Backtester',
+    body: 'Custom 30–70 oscillator channel paired with a live rolling 500-candle win-rate engine.',
+    icon: 'crosshair',
+  },
+  {
+    id: 'risk',
+    title: 'Binance Risk Watch Safety Center',
+    body: 'Tracks Monitoring Tag (⚠) coins, Upcoming Delisting Notices, and Binance Spot News hourly.',
+    icon: 'shieldAlert',
+  },
+  {
+    id: 'sentiment',
+    title: '24h Market Sentiment & Top Movers',
+    body: 'Live Bullish / Neutral / Bearish market breadth gauge and top 5 surging gainers.',
+    icon: 'activity',
+  },
+  {
+    id: 'tradingview',
+    title: 'Multi-Timeframe TradingView Handoff',
+    body: 'One-click deep-linking to Binance charts synced to your 15M / 30M / 1H / 4H / 1D setting.',
+    icon: 'candles',
+  },
+  {
+    id: 'alerts',
+    title: 'Real-Time Audio Alerts & Signal Logs',
+    body: 'Precision sound chimes and live execution logs the moment setups hit entry confirmation.',
+    icon: 'volume',
+  },
+];
+
+/** §1.1 / §11.1  Official Alpha X Scanner tutorial videos — [LIVE-VERIFIED]. */
 export const TUTORIALS = [
   {
     id: 'AOtweJ-XWbk',
-    title: 'How to Login & Open ScalpPro in Just 2 Clicks Easy Guide',
+    title: 'How to Login & Open Alpha X Scanner in Just 2 Clicks Easy Guide',
     duration: '5:01',
     lesson: 'Login & Setup Guide',
     summary:
@@ -37,7 +123,7 @@ export const TUTORIALS = [
   },
   {
     id: 'pz9-8XH6irE',
-    title: 'ScalpPro Website Overview | Crypto Coin Finder & Scanners Explained in Urdu',
+    title: 'Alpha X Scanner Website Overview | Crypto Coin Finder & Scanners Explained in Urdu',
     duration: '11:38',
     lesson: 'Lesson 1 — Website Overview',
     summary:
@@ -46,7 +132,7 @@ export const TUTORIALS = [
   },
   {
     id: 'W8LMwkfrj-Q',
-    title: 'ScalpPro Scanner Tutorial | V1, Order Block & EMA Scanners Kaise Use Karein?',
+    title: 'Alpha X Scanner Scanner Tutorial | V1, Order Block & EMA Scanners Kaise Use Karein?',
     duration: '6:19',
     lesson: 'Lesson 2 — Scanners Walkthrough',
     summary:
@@ -55,7 +141,7 @@ export const TUTORIALS = [
   },
   {
     id: 'prQuRAIMJME',
-    title: 'Order Block Strategy Explained in Urdu | ScalpPro Se Coins Find Aur Chart Analysis',
+    title: 'Order Block Strategy Explained in Urdu | Alpha X Scanner Se Coins Find Aur Chart Analysis',
     duration: '5:09',
     lesson: 'Lesson 3 — Order Block Strategy',
     summary:
@@ -64,7 +150,7 @@ export const TUTORIALS = [
   },
   {
     id: 'bX-zxQmfW3U',
-    title: 'EMA Crossover Strategy Explained in Urdu | ScalpPro Scanner Se Chart Analysis Tak',
+    title: 'EMA Crossover Strategy Explained in Urdu | Alpha X Scanner Scanner Se Chart Analysis Tak',
     duration: '19:17',
     lesson: 'Lesson 4 — EMA Crossover Strategy',
     summary:

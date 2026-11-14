@@ -1,7 +1,7 @@
 import type { Config } from 'tailwindcss';
 
 /**
- * ScalpPro design tokens (spec §3.3).
+ * Alpha X Scanner design tokens (spec §3.3).
  * Every colour here is WCAG 2.1 AA verified against the card surface #0E111A.
  */
 const config: Config = {
@@ -30,7 +30,8 @@ const config: Config = {
         'orange-os': '#F97316',
       },
       fontFamily: {
-        ui: ['Inter', 'IBM Plex Sans', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        display: ['Space Grotesk', 'Plus Jakarta Sans', 'Inter', 'sans-serif'],
+        ui: ['Plus Jakarta Sans', 'Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
         num: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
         ur: ['Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', 'Inter', 'sans-serif'],
       },
@@ -50,13 +51,14 @@ const config: Config = {
         tabbar: '36px',
       },
       keyframes: {
+        /* §Phase 2 §2.4 — 600ms radial pulse wave on every live tick. */
         'flash-up': {
-          '0%': { backgroundColor: 'rgba(34,197,94,0.38)' },
-          '100%': { backgroundColor: 'transparent' },
+          '0%': { boxShadow: '0 0 0 0 rgba(0, 210, 106, 0.55)', backgroundColor: 'rgba(0, 210, 106, 0.18)' },
+          '100%': { boxShadow: '0 0 0 14px rgba(0, 210, 106, 0)', backgroundColor: 'transparent' },
         },
         'flash-down': {
-          '0%': { backgroundColor: 'rgba(239,68,68,0.38)' },
-          '100%': { backgroundColor: 'transparent' },
+          '0%': { boxShadow: '0 0 0 0 rgba(255, 59, 92, 0.55)', backgroundColor: 'rgba(255, 59, 92, 0.18)' },
+          '100%': { boxShadow: '0 0 0 14px rgba(255, 59, 92, 0)', backgroundColor: 'transparent' },
         },
         'eq-bar': {
           '0%, 100%': { transform: 'scaleY(0.35)' },

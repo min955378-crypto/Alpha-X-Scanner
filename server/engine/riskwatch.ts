@@ -133,7 +133,7 @@ async function fetchJson(url: string): Promise<unknown> {
   try {
     const res = await fetch(url, {
       signal: ctrl.signal,
-      headers: { accept: 'application/json', 'user-agent': 'ScalpPro/2.0 (+https://scalp-usdt.com)' },
+      headers: { accept: 'application/json', 'user-agent': 'Alpha X Scanner/2.0 (+https://alpha-x-scanner.com)' },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
