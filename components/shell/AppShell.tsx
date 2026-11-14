@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AuroraBackground } from '@/components/ui/Motion3D';
+import { hasAcceptedDisclaimer, persistDisclaimerAccepted } from '@/lib/storage';
 import { Icon, type IconName } from '@/components/ui/Icons';
 import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
@@ -29,20 +30,34 @@ export function AppShell({
   rightSidebar?: ReactNode;
   onCloseSidebar?: () => void;
 }) {
-  const { user, loading, refresh } = useAuth();
+  const { user, loading, refresh, markDisclaimerAccepted } = useAuth();
   const { boot, setTimeframe, timeframe } = useMarket();
   const { settings, hydrated } = useSettings();
   const router = useRouter();
   const [showDisclaimer, setShowDisclaimer] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  /**
+   * §1.1  Route guard.
+   *
+   * `loading` gates the redirect: while auth is still resolving we must not
+   * push to /login, and once resolved we only bounce when there is genuinely
+   * no session. `refresh()` no longer nulls the user on transport errors, so
+   * this can no longer fire because of a dropped request.
+   */
   useEffect(() => {
     if (loading) return;
     if (!user) {
       router.replace('/login');
       return;
     }
-    if (!user.acceptedDisclaimerAt) setShowDisclaimer(true);
+    // §1.4  The local `alphax:v2:*` mirror wins, so a failed server write can
+    // never re-open the modal on the next refresh.
+    if (user.acceptedDisclaimerAt || hasAcceptedDisclaimer(user.username)) {
+      setShowDisclaimer(false);
+      return;
+    }
+    setShowDisclaimer(true);
   }, [loading, user, router]);
 
   // Keep the market socket on the timeframe this user saved in /settings.
@@ -50,11 +65,33 @@ export function AppShell({
     if (hydrated && settings.timeframe !== timeframe) setTimeframe(settings.timeframe);
   }, [hydrated, settings.timeframe, timeframe, setTimeframe]);
 
-  const acceptDisclaimer = useCallback(async () => {
-    await fetch('/api/user/disclaimer', { method: 'POST' });
-    setShowDisclaimer(false);
-    await refresh();
-  }, [refresh]);
+  /**
+   * §1.1 – §1.4  Accepting the disclaimer must be the safest action in the app.
+   *
+   * Order matters:
+   *   1. close the modal immediately (never gated on the network),
+   *   2. merge the acknowledgement into the session non-destructively,
+   *   3. mirror it to `alphax:v2:*` so it survives refreshes and re-logins,
+   *   4. persist to the server on a best-effort basis — a failure here is
+   *      logged and swallowed, NEVER surfaced as a logout or a redirect.
+   */
+  const acceptDisclaimer = useCallback(
+    async (dontRemind: boolean) => {
+      setShowDisclaimer(false);
+      markDisclaimerAccepted();
+      if (user) persistDisclaimerAccepted(user.username, dontRemind);
+
+      try {
+        await fetch('/api/user/disclaimer', { method: 'POST' });
+      } catch {
+        /* Persistence is best-effort; the local mirror already covers us. */
+      }
+
+      // Reconcile with the server, but never let it clear the session.
+      void refresh();
+    },
+    [markDisclaimerAccepted, refresh, user],
+  );
 
   /* §13  Keyboard shortcuts: 1-7 switch tabs, "/" focuses search. */
   useEffect(() => {
