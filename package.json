@@ -1,0 +1,37 @@
+{
+  "name": "scalppro",
+  "version": "2.0.0",
+  "private": true,
+  "description": "ScalpPro \u2014 Smart Binance Coin Finder, RSI Heatmap & Multi-Scanner Terminal",
+  "scripts": {
+    "dev": "tsx server/index.ts",
+    "build": "next build",
+    "start": "NODE_ENV=production tsx server/index.ts",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "qa:contrast": "node scripts/contrast.mjs",
+    "qa:sim": "tsx scripts/tune-sim.ts",
+    "qa:frame": "tsx scripts/qa-frame.ts"
+  },
+  "dependencies": {
+    "next": "^14.2.35",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "ws": "8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.14.10",
+    "@types/react": "18.3.3",
+    "@types/react-dom": "18.3.0",
+    "@types/ws": "8.5.12",
+    "autoprefixer": "10.4.20",
+    "esbuild-register": "3.5.0",
+    "postcss": "8.4.47",
+    "tailwindcss": "3.4.13",
+    "tsx": "4.19.1",
+    "typescript": "5.5.4"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}

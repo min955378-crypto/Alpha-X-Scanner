@@ -1,0 +1,101 @@
+//@version=5
+indicator("ScalpPro — Dual EMA & Last 500 Candles Backtest", shorttitle="ScalpPro Overlay", overlay=true, max_bars_back=600)
+
+// ─── 1. Inputs ───────────────────────────────────────────────────────────────
+fastLen   = input.int(13, "Fast EMA Length", minval=1, group="EMAs")
+slowLen   = input.int(34, "Slow EMA Length", minval=1, group="EMAs")
+rsiLen    = input.int(14, "Alpha Sniper RSI Length", minval=1, group="Alpha Sniper")
+atrLen    = input.int(14, "ATR Length", minval=1, group="500-Candle Backtest")
+tpMult    = input.float(1.5, "TP ATR Multiplier", minval=0.1, step=0.1, group="500-Candle Backtest")
+slMult    = input.float(1.0, "SL ATR Multiplier", minval=0.1, step=0.1, group="500-Candle Backtest")
+lookback  = input.int(500, "Rolling Candle Window", minval=50, maxval=5000, group="500-Candle Backtest")
+minTrades = input.int(5, "Min Closed Trades for Win Rate", minval=1, group="500-Candle Backtest")
+
+// ─── 2. Global-Scope Series Calculations (Evaluated Every Bar) ───────────────
+emaFast     = ta.ema(close, fastLen)
+emaSlow     = ta.ema(close, slowLen)
+rsiRaw      = ta.rsi(close, rsiLen)
+alphaSniper = ta.ema(rsiRaw, 3)
+atrVal      = ta.atr(atrLen)
+
+crossUp30   = ta.crossover(alphaSniper, 30.0)
+crossUp50   = ta.crossover(alphaSniper, 50.0)
+
+// ─── 3. Plot Dual EMAs on Price Pane ─────────────────────────────────────────
+plot(emaFast, title="Fast EMA (Teal)", color=color.new(#00D26A, 0), linewidth=2)
+plot(emaSlow, title="Slow EMA (Red)",  color=color.new(#EF4444, 0), linewidth=2)
+
+// ─── 4. True Rolling 500-Candle Backtest Engine (SL-First, No Entry-Bar Exit)─
+var array<int> tradeBars     = array.new_int(0)
+var array<int> tradeOutcomes = array.new_int(0) // 1 = WIN, -1 = LOSS
+
+var int   active     = 0
+var int   entryBar   = -1
+var float entryPrice = na
+var float tpPrice    = na
+var float slPrice    = na
+
+if active == 1 and bar_index > entryBar
+    if low <= slPrice
+        array.push(tradeBars, entryBar)
+        array.push(tradeOutcomes, -1)
+        active := 0
+    else if high >= tpPrice
+        array.push(tradeBars, entryBar)
+        array.push(tradeOutcomes, 1)
+        active := 0
+
+longTrigger = (crossUp30 or crossUp50) and emaFast >= emaSlow and close > open and not na(atrVal)
+if active == 0 and longTrigger
+    active     := 1
+    entryBar   := bar_index
+    entryPrice := close
+    tpPrice    := close + (atrVal * tpMult)
+    slPrice    := close - (atrVal * slMult)
+
+if active == 1 and (bar_index - entryBar) > lookback
+    active := 0
+
+while array.size(tradeBars) > 0 and (bar_index - array.get(tradeBars, 0)) > lookback
+    array.shift(tradeBars)
+    array.shift(tradeOutcomes)
+
+var table btTable = table.new(position.top_center, 4, 4, bgcolor=color.new(#11141D, 10), border_color=color.new(#F5B301, 55), border_width=1)
+
+if barstate.islast
+    int wins   = 0
+    int losses = 0
+    int count  = array.size(tradeOutcomes)
+    if count > 0
+        for i = 0 to count - 1
+            int outcome = array.get(tradeOutcomes, i)
+            if outcome == 1
+                wins += 1
+            else if outcome == -1
+                losses += 1
+
+    int closedTrades = wins + losses
+    int totalTrades  = closedTrades + active
+
+    table.merge_cells(btTable, 0, 0, 3, 0)
+    table.cell(btTable, 0, 0, "LAST " + str.tostring(lookback) + " CANDLES", bgcolor=color.new(#3D2E0A, 10), text_color=#F5B301, text_size=size.small)
+
+    table.cell(btTable, 0, 1, "TRADES", text_color=#94A3B8, text_size=size.tiny)
+    table.cell(btTable, 1, 1, "WIN",    text_color=#94A3B8, text_size=size.tiny)
+    table.cell(btTable, 2, 1, "LOSS",   text_color=#94A3B8, text_size=size.tiny)
+    table.cell(btTable, 3, 1, "ACTIVE", text_color=#94A3B8, text_size=size.tiny)
+
+    table.cell(btTable, 0, 2, str.tostring(totalTrades), bgcolor=color.new(#F5B301, 82), text_color=#F5B301, text_size=size.small)
+    table.cell(btTable, 1, 2, str.tostring(wins),        bgcolor=color.new(#22C55E, 82), text_color=#22C55E, text_size=size.small)
+    table.cell(btTable, 2, 2, str.tostring(losses),      bgcolor=color.new(#EF4444, 82), text_color=#EF4444, text_size=size.small)
+    table.cell(btTable, 3, 2, str.tostring(active),      bgcolor=color.new(#F5B301, 82), text_color=#F5B301, text_size=size.small)
+
+    string wrText = "WIN RATE: --"
+    if closedTrades >= minTrades
+        float wr = (float(wins) / float(closedTrades)) * 100.0
+        wrText := "WIN RATE: " + str.tostring(wr, "#.#") + "%"
+    else if closedTrades > 0
+        wrText := "WIN RATE: -- (<" + str.tostring(minTrades) + " trades)"
+
+    table.merge_cells(btTable, 0, 3, 3, 3)
+    table.cell(btTable, 0, 3, wrText, bgcolor=color.new(#0E111A, 5), text_color=color.white, text_size=size.small)

@@ -1,0 +1,195 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================================
+   §3.3  MASTER CSS CUSTOM PROPERTIES (WCAG 2.1 AA CONTRAST VERIFIED)
+   ========================================================================= */
+:root {
+  /* Core Surfaces */
+  --bg-0: #070a12;
+  --bg-canvas: #0a0c14;
+  --bg-topbar: #0c0e1a;
+  --bg-dash-tint: radial-gradient(circle at 50% 0%, rgba(16, 42, 35, 0.28) 0%, rgba(10, 12, 20, 0.98) 70%);
+  --bg-card: #0e111a;
+  --bg-card-2: #11141d;
+  --bg-hover: #1a2337;
+
+  /* Borders & Non-Text Dividers */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-line: #243049;
+  --border-focus: #f5b301;
+
+  /* Text Hierarchy — all meet >= 4.5:1 AA contrast against #0E111A */
+  --text-primary: #ffffff; /* 19.1:1 */
+  --text-bright: #eaf0ff; /* 16.8:1 */
+  --text-secondary: #94a3b8; /*  6.7:1 */
+  --text-muted: #7e8fa6; /*  4.6:1 */
+
+  /* Semantic Accents */
+  --green-pos: #22c55e;
+  --green-bright: #00d26a;
+  --red-neg: #f87171; /* 5.67:1 worst-case (was #ef4444 @ 4.17:1 on --bg-hover) */
+  --amber-warn: #f5b301;
+  --blue-info: #60a5fa; /* 6.17:1 worst-case (was #3b82f6 @ 4.26:1 on --bg-hover) */
+  --purple-gain: #a78bfa; /* 5.76:1 worst-case (was #8b5cf6 @ 3.70:1 on --bg-hover) */
+  --orange-os: #f97316;
+
+  /* 6 RSI Heatmap Zone Tile Palettes */
+  --tile-gainers-bg: rgba(88, 28, 135, 0.35);
+  --tile-gainers-border: rgba(139, 92, 246, 0.6);
+  --tile-v1-bg: rgba(20, 83, 45, 0.38);
+  --tile-v1-border: rgba(34, 197, 94, 0.55);
+  --tile-neutral-bg: rgba(30, 41, 59, 0.48);
+  --tile-neutral-border: rgba(126, 143, 166, 0.45);
+  --tile-hiddenbull-bg: rgba(30, 58, 138, 0.4);
+  --tile-hiddenbull-border: rgba(59, 130, 246, 0.6);
+  --tile-oversold-bg: rgba(124, 45, 18, 0.42);
+  --tile-oversold-border: rgba(249, 115, 22, 0.6);
+  --tile-extreme-bg: rgba(127, 29, 29, 0.45);
+  --tile-extreme-border: rgba(239, 68, 68, 0.65);
+
+  /* Monitoring Tag (⚠) Override Tile */
+  --tile-warn-bg: rgba(113, 92, 18, 0.45);
+  --tile-warn-border: rgba(245, 179, 1, 0.7);
+  --tile-warn-text: #fde047;
+
+  /* Fonts */
+  --font-ui: 'Inter', 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-num: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-ur: 'Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', 'Inter', sans-serif;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  /* §13  Sticky-header overflow rule: `clip`, NEVER `hidden`. */
+  body {
+    background-color: var(--bg-canvas);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    overflow-x: clip;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* §3.2  Copy mandate: never disable selection on body/main/data containers. */
+  body,
+  main,
+  [data-copyable] {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 1px;
+  }
+
+  ::selection {
+    background: rgba(245, 179, 1, 0.32);
+    color: #fff;
+  }
+
+  /* Compact, dark scrollbars that match the terminal aesthetic. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #243049 transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #243049;
+    border-radius: 999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: #33415c;
+  }
+}
+
+@layer components {
+  /* §3.1  Tabular numerals for every numeric read-out in the product. */
+  .mono-num {
+    font-family: var(--font-num);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1, 'zero' 1;
+  }
+
+  .ur {
+    font-family: var(--font-ur);
+    direction: rtl;
+    line-height: 1.95;
+  }
+
+  .card {
+    @apply rounded-xl border border-white/[0.06] bg-[#0e111a];
+  }
+
+  .pill {
+    @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold leading-none;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-semibold transition-colors;
+  }
+
+  .btn-ghost {
+    @apply btn border-white/10 bg-white/[0.03] text-text-secondary hover:bg-white/[0.07] hover:text-white;
+  }
+
+  .btn-green {
+    @apply btn border-emerald-500/50 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20;
+  }
+
+  .btn-red {
+    @apply btn border-red-500/50 bg-red-500/10 text-red-400 hover:bg-red-500/20;
+  }
+
+  .btn-blue {
+    @apply btn border-indigo-500/50 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20;
+  }
+
+  .btn-amber {
+    @apply btn border-amber-500/55 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20;
+  }
+
+  .input {
+    @apply h-7 w-full rounded border border-white/10 bg-[#11141d] px-2 text-[11.5px] text-white placeholder:text-text-muted focus:border-amber-500/60 focus:outline-none;
+  }
+
+  .zone-tile {
+    @apply flex flex-col items-center justify-center rounded-[6px] border leading-tight transition-colors select-text;
+  }
+}
+
+@layer utilities {
+  .dash-tint {
+    background: var(--bg-dash-tint);
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* §4.1  Respect the OS reduced-motion setting everywhere. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
