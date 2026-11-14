@@ -3,7 +3,16 @@ import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 
 import { encodeFrame, type WireFrame } from '@/lib/wire';
-import { SCANNER_BY_SLUG, type ClientMessage, type EntitlementKey, type ScannerSlug, type ServerMessage, type Timeframe } from '@/lib/types';
+import {
+  SCANNER_BY_SLUG,
+  type BroadcastLevel,
+  type BroadcastSeverity,
+  type ClientMessage,
+  type EntitlementKey,
+  type ScannerSlug,
+  type ServerMessage,
+  type Timeframe,
+} from '@/lib/types';
 import { getEngine } from './engine';
 import { getDb, type UserRecord } from './engine/db';
 import { parseCookies, sessionUserFromToken, SESSION_COOKIE } from './engine/auth';
@@ -105,6 +114,20 @@ function onConnection(socket: WebSocket, req: IncomingMessage): void {
     send(client, { type: 'signals', scannerSlug: slug, signals: engine.getSignals(slug) });
   }
 
+  /* MODULE 8  Replay a live banner so a client that connects after the
+     announcement (or reloads the page) still sees it. */
+  const banner = getDb().systemConfig.broadcast;
+  if (banner && (banner.expiresAt === null || banner.expiresAt > Date.now()) && banner.title) {
+    send(client, {
+      type: 'broadcast',
+      title: banner.title,
+      body: banner.message,
+      severity: banner.severity,
+      level: banner.severity === 'WARNING' || banner.severity === 'URGENT' ? 'warn' : 'info',
+      createdAt: banner.createdAt,
+    });
+  }
+
   socket.on('message', (raw) => {
     let msg: ClientMessage;
     try {
@@ -202,6 +225,17 @@ export function pushAccessUpdate(userId: string): void {
 }
 
 /** §10 module 7 — live announcement toast to every connected client. */
-export function pushBroadcast(title: string, body: string, level: 'info' | 'warn' = 'info'): void {
-  for (const client of clients) send(client, { type: 'broadcast', title, body, level });
+/**
+ * MODULE 8  Push a live announcement to every connected client.
+ * `severity` is the admin-facing four-way classification; `level` is the
+ * two-tone value the toast component renders.
+ */
+export function pushBroadcast(
+  title: string,
+  body: string,
+  severity: BroadcastSeverity,
+  level: BroadcastLevel,
+  createdAt = Date.now(),
+): void {
+  for (const client of clients) send(client, { type: 'broadcast', title, body, level, severity, createdAt });
 }

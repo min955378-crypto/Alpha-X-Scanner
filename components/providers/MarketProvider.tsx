@@ -132,7 +132,8 @@ export function MarketProvider({
         case 'access':
           break;
         case 'broadcast':
-          push({ title: msg.title, body: msg.body, level: msg.level === 'warn' ? 'warn' : 'info' });
+          /* An empty title is the admin clearing the banner. */
+          if (msg.title) push({ title: msg.title, body: msg.body, level: msg.level === 'warn' ? 'warn' : 'info' });
           break;
         case 'pong':
           break;

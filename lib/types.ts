@@ -417,7 +417,7 @@ export type ServerMessage =
   | { type: 'boot'; boot: BootStatus }
   | { type: 'riskwatch'; updatedAt: number }
   | { type: 'access'; entitlements: Record<EntitlementKey, boolean> }
-  | { type: 'broadcast'; title: string; body: string; level: 'info' | 'warn' }
+  | { type: 'broadcast'; title: string; body: string; level: BroadcastLevel; severity: BroadcastSeverity; createdAt: number }
   | { type: 'pong'; t: number };
 
 export type ClientMessage =
@@ -429,6 +429,31 @@ export type ClientMessage =
 /* -------------------------------------------------------------------------- */
 /* RISK WATCH (spec §8)                                                       */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * MODULE 6  Manual VIP signal injected by the Admin.
+ * Carries its own payload so it can be re-broadcast on reconnect without
+ * depending on the scanner engine having produced it.
+ */
+export interface CustomSignal {
+  id: string;
+  scannerSlug: ScannerSlug;
+  symbol: string;
+  baseAsset: string;
+  timeframe: Timeframe;
+  direction: SignalDirection;
+  entryPrice: number;
+  invalidationPrice: number;
+  tp1Price: number;
+  tp2Price: number | null;
+  score: number;
+  reasons: string[];
+  note: string | null;
+  createdAt: number;
+  /** Admin signals never auto-expire — they stay until explicitly deleted. */
+  validUntil: number | null;
+  createdBy: string;
+}
 
 export type RiskCategory = 'MONITORING_TAG' | 'DELISTING_NOTICE' | 'SPOT_NEWS';
 
@@ -489,6 +514,40 @@ export interface SystemConfig {
   promoTagline: string;
   whatsappContact: string;
   loginCarouselJson: CarouselSlide[] | null;
+  /** MODULE 8  Editable product name shown across the terminal chrome. */
+  productName: string;
+  /** MODULE 8  Pre-filled WhatsApp licence-request message template. */
+  whatsappMessageTemplate: string;
+  /**
+   * MODULE 8  The 12 login feature cards (icon / title / description).
+   * Null means "use the built-in factory copy", so a fresh deployment still
+   * renders without a seeded config row.
+   */
+  loginFeaturesJson: LoginFeatureRow[] | null;
+  /** MODULE 8  Global broadcast banner pushed to every connected socket. */
+  broadcast: BroadcastState | null;
+}
+
+export interface LoginFeatureRow {
+  id: string;
+  title: string;
+  body: string;
+  icon: string;
+}
+
+export type BroadcastSeverity = 'INFO' | 'BULLISH' | 'WARNING' | 'URGENT';
+
+/** Wire-level severity the toast component already understands. */
+export type BroadcastLevel = 'info' | 'warn';
+
+export interface BroadcastState {
+  title: string;
+  message: string;
+  severity: BroadcastSeverity;
+  createdAt: number;
+  createdBy: string;
+  /** When the banner stops being served to newly-connecting clients. */
+  expiresAt: number | null;
 }
 
 export interface CarouselSlide {
@@ -524,6 +583,8 @@ export interface LicenseKeyRow {
   grants: Entitlements;
   assignedUserId: string | null;
   assignedUsername: string | null;
+  /** MODULE 3  How many of `maxDevices` are currently registered. */
+  devicesUsed?: number;
   activatedAt: number | null;
   expiresAt: number | null;
   createdAt: number;
@@ -557,6 +618,10 @@ export interface SystemHealth {
   dataMode: DataMode;
   /** §4.3  Which upstream actually served the last successful call. */
   provider: 'binance' | 'bybit' | 'coincap' | 'NONE';
+  /** MODULE 1  Wall-clock ms of the last all-scanner sweep. */
+  lastScanDurationMs: number | null;
+  /** MODULE 1  Market socket round-trip latency in ms. */
+  wsLatencyMs: number | null;
   uptimeSec: number;
   scanCycle: number;
   heapUsedMb: number;

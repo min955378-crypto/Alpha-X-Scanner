@@ -1,4 +1,15 @@
-import { SCANNERS, type BootStatus, type MarketFrame, type ScannerSlug, type ScannerSignal, type ServerMessage, type SystemHealth, type Timeframe } from '@/lib/types';
+import {
+  SCANNERS,
+  type BootStatus,
+  type CustomSignal,
+  type MarketFrame,
+  type ScannerSlug,
+  type ScannerSignal,
+  type ScoreBreakdown,
+  type ServerMessage,
+  type SystemHealth,
+  type Timeframe,
+} from '@/lib/types';
 import {
   MiniTickerStream,
   WEIGHT_CAP_PER_MIN,
@@ -61,6 +72,10 @@ class Engine {
   signals = new Map<ScannerSlug, ScannerSignal[]>();
   lastScanAt = new Map<ScannerSlug, number>();
   riskUpdatedAt: number | null = null;
+  /** MODULE 1  Wall-clock ms of the most recent all-scanner sweep. */
+  lastScanDurationMs: number | null = null;
+  /** MODULE 1  Round-trip latency of the market socket, in ms. */
+  wsLatencyMs: number | null = null;
   riskNextAt = Date.now() + RISK_REFRESH_MS;
   riskError: string | null = null;
 
@@ -110,6 +125,7 @@ class Engine {
     }
 
     this.store.setUniverse(entries);
+    this.applyCoinOverrides();
     this.boot.total = entries.length;
     this.boot.phase = 'PHASE_A';
 
@@ -228,6 +244,7 @@ class Engine {
        so the heatmap / Pro Table / Coin Finder show the same number the
        scanner's signal card shows. */
     const scores = new Map<string, number>();
+    const scanStartedAt = Date.now();
     for (const slug of this.requestedScanners) {
       try {
         const cfg = getDb().scannerConfigs.get(slug);
@@ -250,6 +267,7 @@ class Engine {
       }
     }
     this.store.setScores(scores);
+    this.lastScanDurationMs = Date.now() - scanStartedAt;
 
     for (const tf of this.requestedTimeframes) {
       const frame = this.store.buildFrame(tf, now, 60, this.cycle, this.dataMode, this.boot, this.riskUpdatedAt);
@@ -300,8 +318,129 @@ class Engine {
     return frame;
   }
 
+  /**
+   * MODULE 6  Admin-published VIP signals are merged in ABOVE the engine
+   * output so a manual high-conviction setup is the first thing a customer
+   * sees, and are re-served on every reconnect because they live in the DB.
+   */
   getSignals(slug: ScannerSlug): ScannerSignal[] {
-    return this.signals.get(slug) ?? [];
+    const engineSignals = this.signals.get(slug) ?? [];
+    const custom = getDb()
+      .listCustomSignals()
+      .filter((c) => c.scannerSlug === slug)
+      .map(customSignalToScannerSignal);
+    return [...custom, ...engineSignals];
+  }
+
+  /** MODULE 6  Push the merged signal lists to every subscribed socket now. */
+  broadcastSignals(): void {
+    for (const slug of this.requestedScanners) {
+      this.emit({ type: 'signals', scannerSlug: slug, signals: this.getSignals(slug) });
+    }
+  }
+
+  /**
+   * MODULE 6  Re-apply the operator's persisted coin overrides after a
+   * universe rebuild, so an admin's enable / ⚠ decisions survive a restart or
+   * a forced reseed instead of reverting to the exchange defaults.
+   */
+  private applyCoinOverrides(): number {
+    const overrides = getDb().coinOverrides;
+    let applied = 0;
+    for (const [symbol, o] of Object.entries(overrides)) {
+      const st = this.store.symbols.get(symbol);
+      if (!st) continue;
+      st.enabled = o.enabled;
+      st.isMonitoringTag = o.isMonitoringTag;
+      st.manualTagOverride = o.manualTagOverride;
+      applied += 1;
+    }
+    return applied;
+  }
+
+  /**
+   * MODULE 1  Force Market Reseed.
+   *
+   * Re-fetches the exchange universe (live if reachable, bundled snapshot
+   * otherwise) and restarts the Phase A warm-up / Phase B 500-candle backfill
+   * ladder. Existing symbol state is reused wherever the symbol still exists so
+   * the terminal never goes blank mid-reseed.
+   */
+  async reseed(): Promise<{ coins: number; mode: 'LIVE' | 'SIMULATED' }> {
+    const monitoring = monitoringTagSet();
+    let entries = await fetchUniverse(monitoring);
+    if (entries) {
+      this.dataMode = 'LIVE';
+    } else {
+      entries = buildUniverse();
+      this.dataMode = 'SIMULATED';
+    }
+
+    this.store.setUniverse(entries);
+    this.applyCoinOverrides();
+    this.boot.total = entries.length;
+    this.boot.seeded = 0;
+    this.boot.phaseAReady = false;
+    this.boot.phaseBReady = false;
+    this.boot.phaseAElapsedSec = null;
+    this.boot.phase = 'PHASE_A';
+    this.frames.clear();
+    this.signals.clear();
+
+    if (this.phaseATimer) clearInterval(this.phaseATimer);
+    if (this.phaseBTimer) clearInterval(this.phaseBTimer);
+    this.phaseBTimer = null;
+
+    this.seedQueue = this.store.order.slice();
+    this.phaseATimer = setInterval(() => {
+      const symbol = this.seedQueue.shift();
+      if (!symbol) {
+        if (this.phaseATimer) clearInterval(this.phaseATimer);
+        this.phaseATimer = null;
+        this.boot.phaseAReady = true;
+        this.boot.phaseAElapsedSec = Math.round(((Date.now() - this.startedAt) / 1000) * 10) / 10;
+        this.boot.phase = 'PHASE_B';
+        this.startPhaseB();
+        return;
+      }
+      this.store.seedSymbol(symbol, Date.now());
+      this.meter.add(klinesWeight(99));
+      this.boot.seeded += 1;
+      this.emitBoot();
+    }, Math.max(5, Math.round(1000 / PHASE_A_RPS)));
+
+    this.emitBoot();
+    return { coins: entries.length, mode: this.dataMode };
+  }
+
+  /**
+   * MODULE 5  Hot-reload the quant engine after an admin saves scanner
+   * parameters. Rebuilds the warm-up series the store derives from the tuned
+   * structural values, then rescans every requested scanner immediately.
+   */
+  applyScannerConfig(): { rewarmed: number; rescanned: ScannerSlug[] } {
+    const rewarmed = this.store.rewarm();
+    const rescanned: ScannerSlug[] = [];
+    const now = Date.now();
+    for (const slug of this.requestedScanners) {
+      try {
+        const cfg = getDb().scannerConfigs.get(slug);
+        if (cfg && !cfg.enabled) {
+          this.signals.set(slug, []);
+          continue;
+        }
+        const tf = cfg?.defaultTimeframe ?? '1H';
+        const list = runScanner(slug, this.store, tf, now, this.cycle);
+        this.signals.set(slug, list);
+        this.lastScanAt.set(slug, now);
+        this.emit({ type: 'signals', scannerSlug: slug, signals: list });
+        rescanned.push(slug);
+      } catch (err) {
+        console.error(`[engine] hot-reload rescan failed for ${slug}`, err);
+      }
+    }
+    this.emitBoot();
+    return { rewarmed, rescanned };
   }
 
   secondsToNextCycle(): number {
@@ -353,6 +492,8 @@ class Engine {
         subscriptions: Object.fromEntries([...this.requestedTimeframes].map((tf) => [tf, this.store.symbols.size])),
       },
       dataMode: this.dataMode,
+      lastScanDurationMs: this.lastScanDurationMs,
+      wsLatencyMs: this.wsLatencyMs,
       uptimeSec: Math.round((Date.now() - this.startedAt) / 1000),
       scanCycle: this.cycle,
       heapUsedMb: Math.round((process.memoryUsage().heapUsed / 1024 / 1024) * 10) / 10,
@@ -362,6 +503,51 @@ class Engine {
   getRiskItems() {
     return listRiskItems();
   }
+}
+
+/**
+ * MODULE 6  Adapt a persisted `CustomSignal` into the wire `ScannerSignal`
+ * shape. Score is redistributed across the breakdown so the signal card
+ * renders the admin's number as `total` without inventing fake sub-scores.
+ */
+function customSignalToScannerSignal(c: CustomSignal): ScannerSignal {
+  const share = Math.round(c.score / 8);
+  const breakdown: ScoreBreakdown = {
+    structure: share,
+    volume: share,
+    trend: share,
+    htf: share,
+    rr: share,
+    liquidity: share,
+    risk: share,
+    total: c.score,
+  };
+
+  return {
+    id: c.id,
+    scannerSlug: c.scannerSlug,
+    symbol: c.symbol,
+    baseAsset: c.baseAsset,
+    timeframe: c.timeframe,
+    direction: c.direction,
+    stage: 'ENTRY_READY',
+    score: c.score,
+    scoreBreakdown: breakdown,
+    entryPrice: c.entryPrice,
+    invalidationPrice: c.invalidationPrice,
+    tp1Price: c.tp1Price,
+    tp2Price: c.tp2Price,
+    rrRatio:
+      Math.abs(c.entryPrice - c.invalidationPrice) > 0
+        ? Math.abs((c.tp1Price - c.entryPrice) / (c.entryPrice - c.invalidationPrice))
+        : 0,
+    rsiValue: 0,
+    rvolValue: 0,
+    reasons: [`★ VIP MANUAL SIGNAL — ${c.createdBy}`, ...c.reasons, ...(c.note ? [c.note] : [])],
+    isMonitoringTag: false,
+    createdAt: c.createdAt,
+    validUntil: c.validUntil ?? Number.MAX_SAFE_INTEGER,
+  };
 }
 
 const GLOBAL_KEY = '__alpha_x_engine__';

@@ -13,7 +13,8 @@
     "qa:sim": "tsx scripts/tune-sim.ts",
     "qa:frame": "tsx scripts/qa-frame.ts",
     "qa:disclaimer": "tsx scripts/qa-disclaimer.ts",
-    "qa:providers": "tsx scripts/qa-providers.ts"
+    "qa:providers": "tsx scripts/qa-providers.ts",
+    "qa:scanner-params": "tsx scripts/qa-scanner-params.ts"
   },
   "dependencies": {
     "lightweight-charts": "^4.2.3",
