@@ -13,6 +13,10 @@
  * Run with `npm run qa:pg`.
  */
 
+/* Must be the first import: it redirects the JSON snapshot before db.ts
+   resolves its data file, so this suite never touches the real store. */
+import './_isolate';
+
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -182,6 +186,21 @@ async function main(): Promise<void> {
   db.users.get('u-1')!.whatsappNumber = '0348-5581969';
   /* pgUpsert deliberately skips empty payloads, so give the audit log a row. */
   db.audit('pgadmin', 'QA_PROBE', 'u-1');
+
+  /* §3.2 asserts a flush writes a row for every table, but the seed ships no
+     RiskWatchItem — those are only produced by the risk-watch scanner at
+     runtime. Create one so the assertion proves the flush path works rather
+     than silently depending on whatever a prior server run left behind. */
+  db.addRiskItem({
+    category: 'MONITORING_TAG',
+    badgeType: 'Monitoring',
+    symbol: 'BTCUSDT',
+    title: 'QA probe risk item',
+    publishedAt: Date.now(),
+    effectiveDelistDate: null,
+    sourceUrl: 'https://qa.invalid/risk-probe',
+    isPinned: false,
+  });
   await db.flushToPostgres();
 
   const byTable = Object.fromEntries(recorded.map((r) => [r.table, r]));

@@ -32,6 +32,10 @@ export function UsersModule({
   const [swapUser, setSwapUser] = useState<UserRow | null>(null);
   const [swapKey, setSwapKey] = useState('');
 
+  /* §3.2  Deletion is irreversible and reaches Supabase, so it gets its own
+     confirmation step rather than firing from the row. */
+  const [removeUser, setRemoveUser] = useState<UserRow | null>(null);
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return [...data.users]
@@ -181,6 +185,13 @@ export function UsersModule({
                           >
                             {u.isSuspended ? '▶ Unsuspend' : '⏸ Suspend'}
                           </Btn>
+                          <Btn
+                            tone="red"
+                            disabled={busy}
+                            onClick={() => setRemoveUser(u)}
+                          >
+                            🗑 Remove User
+                          </Btn>
                           {intl ? (
                             <a
                               href={`https://wa.me/${intl}`}
@@ -218,6 +229,47 @@ export function UsersModule({
             </Btn>
             <Btn tone="green" icon="key" busy={busy} disabled={newPw.length < 6} onClick={submitPassword}>
               Apply New Password
+            </Btn>
+          </div>
+        </div>
+      </Modal>
+
+      {/* §3.2  Permanent removal — confirmed, then deleted from Supabase too. */}
+      <Modal
+        open={removeUser !== null}
+        onClose={() => setRemoveUser(null)}
+        title={`Remove ${removeUser?.username ?? ''} permanently?`}
+        width={460}
+      >
+        <div className="space-y-3">
+          <p className="text-[11px] leading-relaxed text-text-secondary">
+            This deletes the account from memory, from the on-disk snapshot and from Supabase Postgres. It cannot be
+            undone, and the customer will not be able to sign in again.
+          </p>
+          <p className="text-[10.5px] leading-relaxed text-text-muted">
+            Their license key is <span className="font-semibold text-text-bright">released, not deleted</span> — it
+            returns to the vault as an unassigned key you can hand to someone else.
+          </p>
+          {removeUser?.role === 'ADMIN' ? (
+            <p className="rounded border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-[10.5px] font-semibold text-amber-400">
+              This is an administrator account. The last remaining admin cannot be removed.
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Btn icon="reset" onClick={() => setRemoveUser(null)}>
+              Cancel
+            </Btn>
+            <Btn
+              tone="red"
+              icon="shieldAlert"
+              busy={busy}
+              onClick={async () => {
+                if (!removeUser) return;
+                await act({ action: 'delete', userId: removeUser.id }, `${removeUser.username} removed permanently.`);
+                setRemoveUser(null);
+              }}
+            >
+              🗑 Delete Permanently
             </Btn>
           </div>
         </div>

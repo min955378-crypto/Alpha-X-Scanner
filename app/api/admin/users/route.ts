@@ -14,6 +14,7 @@ export const dynamic = 'force-dynamic';
  *
  * Actions: create · toggle-entitlement · grant-full · suspend · reset-password
  *          · set-whatsapp · reset-devices · assign-key · mint-replacement-key
+ *          · delete
  */
 async function handlePost(req: Request) {
   const guard = requireAdmin(req);
@@ -30,7 +31,8 @@ async function handlePost(req: Request) {
       | 'set-whatsapp'
       | 'reset-devices'
       | 'assign-key'
-      | 'mint-replacement-key';
+      | 'mint-replacement-key'
+      | 'delete';
     userId?: string;
     username?: string;
     password?: string;
@@ -118,6 +120,26 @@ async function handlePost(req: Request) {
       db.resetLicenseDevices(lic.id);
       db.audit(admin.username, 'USER_RESET_DEVICES', target.id);
       break;
+    }
+
+    /**
+     * MODULE 3  Permanently remove a user.
+     *
+     * §3.1  `db.deleteUser` removes the row from memory, from disk and (through
+     * the delete queue) from Supabase Postgres, so the next cold start cannot
+     * bring them back. The last remaining admin is refused — deleting them
+     * would make the portal permanently unreachable.
+     */
+    case 'delete': {
+      const res = db.deleteUser(target.id);
+      if (!res.ok) {
+        const status =
+          res.error === 'LAST_ADMIN' ? 409 : res.error === 'NOT_FOUND' ? 404 : 400;
+        return NextResponse.json({ ok: false, error: res.error }, { status });
+      }
+      db.audit(admin.username, 'USER_DELETE', target.id);
+      pushAccessUpdate(target.id);
+      return NextResponse.json({ ok: true });
     }
 
     /** MODULE 4  Bind an existing unassigned key to this user. */

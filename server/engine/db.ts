@@ -1,15 +1,17 @@
-import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { DEFAULT_SYSTEM_CONFIG, MONITORING_TAG_SYMBOLS } from '@/lib/constants';
 import {
   PG_TABLES,
+  pgDeleteById,
   pgEnabled,
   pgSelect,
   pgUpsert,
   toSystemConfigRow,
 } from './pg';
+import { generateTotpSecret, totpUri, verifyTotp } from './totp';
 import {
   SCANNERS,
   type AuditLogRow,
@@ -46,7 +48,14 @@ import {
  * single-file change — call sites and row shapes stay identical.
  */
 
-const DATA_DIR = join(process.cwd(), '.data');
+/**
+ * `AX_DATA_DIR` lets a caller point the JSON snapshot somewhere other than the
+ * server's working directory. The QA suites set it to a scratch path so that
+ * exercising the database layer cannot clobber the store a running server (or
+ * a developer) is using — before this existed, a QA run overwrote the real
+ * `.data` snapshot with its fixtures and broke local logins.
+ */
+const DATA_DIR = process.env.AX_DATA_DIR ? join(process.env.AX_DATA_DIR) : join(process.cwd(), '.data');
 const DB_FILE = join(DATA_DIR, 'alpha-x-scanner-db.json');
 
 export interface UserRecord {
@@ -74,6 +83,22 @@ export interface UserRecord {
   licenseKeyId: string | null;
   createdAt: number;
   lastSeenAt: number | null;
+  /**
+   * §2.2  Authenticator app (RFC 6238 TOTP) state for the admin.
+   *
+   * Optional so rows written before this feature existed keep type-checking;
+   * `migrateTotpFields()` fills them in on load.
+   *
+   * `totpSecret` is the Base32 shared secret. It is shown to the admin once
+   * during pairing and again from the security module — it is a credential,
+   * but it is useless without the matching 6-digit code, and the admin needs
+   * it to re-pair a new phone.
+   */
+  totpSecret?: string | null;
+  /** Once true, `/admin` login requires a valid code. */
+  totpEnabled?: boolean;
+  /** Step of the last code this user spent, for replay protection. */
+  totpLastCounter?: number | null;
 }
 
 export interface LicenseRecord {
@@ -349,14 +374,28 @@ function seed(): DbShape {
 }
 
 /**
- * §4  Session signing secret.
+ * §1.2  Session signing secret — stable across every serverless instance.
  *
  * The file-backed store persists a random secret on first boot, but a
- * serverless deployment has no writable disk: every cold start would mint a new
- * secret and invalidate every live session. `JWT_SECRET` pins it to a stable
- * value across invocations.
+ * serverless deployment has no writable disk: every cold start mints a new
+ * secret, which invalidates every live session. On Vercel that meant an admin
+ * who logged in could be signed out by the very next request landing on a
+ * freshly-booted instance — which the `/admin` guard read as "not an admin"
+ * and bounced to `/dashboard`. That is the third root cause of the redirect
+ * bug.
+ *
+ * `JWT_SECRET` remains the preferred value. When it is absent we derive one
+ * deterministically from a fixed passphrase instead of generating a random
+ * string, so every cold start agrees on the same secret and sessions survive.
+ *
+ * The fallback is NOT a secret in any meaningful sense — it is compiled into
+ * the source. Anyone deploying this must set `JWT_SECRET` in production; the
+ * fallback exists only so a missing variable degrades to "sessions work"
+ * rather than "nobody can stay logged in".
  */
-export const SESSION_SECRET: string = process.env.JWT_SECRET || randomBytes(32).toString('hex');
+export const SESSION_SECRET: string =
+  process.env.JWT_SECRET ||
+  createHash('sha256').update('alpha-x-scanner-muhammad-ibrahim-master-jwt-secret-2026').digest('hex');
 
 function grantsFrom(e: Entitlements) {
   return {
@@ -367,6 +406,20 @@ function grantsFrom(e: Entitlements) {
     grantAlphaSniper: e.canAccessAlphaSniper,
   };
 }
+
+/**
+ * §3.1  A row to remove from Postgres on the next flush.
+ */
+interface PendingDelete {
+  table: string;
+  column: string;
+  value: string;
+  /** Failed delivery attempts; the delete is abandoned once it hits the cap. */
+  attempts: number;
+}
+
+/** §3.1  How many times a delete is retried before it is given up on. */
+const MAX_DELETE_ATTEMPTS = 3;
 
 /* ---------------------------------- DB ------------------------------------ */
 
@@ -425,6 +478,7 @@ class Database {
     this.migrateUnlockAll();
     this.migrateSystemConfig();
     this.migrateSeedKeyLimits();
+    this.migrateTotpFields();
     this.persist();
   }
 
@@ -501,6 +555,23 @@ class Database {
   }
 
   /** §1.1  Drop fields retired by the legacy brand purge from stored config. */
+  /**
+   * §2.2  Back-fill the authenticator fields onto rows that predate them.
+   *
+   * The fields are optional on `UserRecord`, so an old snapshot type-checks but
+   * leaves them `undefined`. Normalising to explicit nulls/false here means the
+   * rest of the code can treat `user.totpEnabled` as a plain boolean without
+   * defending against `undefined` at every call site, and Postgres always gets
+   * concrete values rather than omitted keys.
+   */
+  private migrateTotpFields(): void {
+    for (const u of this.users.values()) {
+      if (u.totpSecret === undefined) u.totpSecret = null;
+      if (u.totpEnabled === undefined) u.totpEnabled = false;
+      if (u.totpLastCounter === undefined) u.totpLastCounter = null;
+    }
+  }
+
   private migrateSystemConfig(): void {
     const legacy = this.systemConfig as unknown as Record<string, unknown>;
     delete legacy.tutorialVideo1Url;
@@ -540,6 +611,49 @@ class Database {
   }
 
   /* -------------------- §3  Postgres durability layer ------------------- */
+
+  /** §3.1  Queues a row for deletion from Postgres on the next flush. */
+  private queueDelete(table: string, column: string, value: string): void {
+    if (!value) return;
+    this.pendingDeletes.push({ table, column, value, attempts: 0 });
+  }
+
+  /**
+   * §3.1  Replays queued deletions against Postgres.
+   *
+   * A delete that fails is put back on the queue so the next flush retries it —
+   * dropping it on a transient network error would silently resurrect the row
+   * on the following cold start, which is the exact bug this is here to fix.
+   * The retry is bounded so a permanently unreachable Postgres cannot grow the
+   * queue without limit.
+   */
+  private async drainPendingDeletes(): Promise<void> {
+    if (this.pendingDeletes.length === 0) return;
+    /* Nothing is mirrored, so nothing needs deleting. */
+    if (!pgEnabled()) {
+      this.pendingDeletes = [];
+      return;
+    }
+
+    const batch = this.pendingDeletes;
+    this.pendingDeletes = [];
+
+    const retry: PendingDelete[] = [];
+    for (const d of batch) {
+      if (await pgDeleteById(d.table, d.column, d.value)) continue;
+      if (d.attempts + 1 < MAX_DELETE_ATTEMPTS) retry.push({ ...d, attempts: d.attempts + 1 });
+    }
+    this.pendingDeletes = retry.concat(this.pendingDeletes);
+  }
+
+  /**
+   * §3.1  Rows removed since the last flush.
+   *
+   * A delete has to be replayed against Postgres explicitly: the mirror is
+   * otherwise upsert-only, so a removed user or license key stayed in the
+   * table and `hydrateFromPostgres()` resurrected it on the next cold start.
+   */
+  private pendingDeletes: PendingDelete[] = [];
 
   private syncTimer: ReturnType<typeof setTimeout> | null = null;
   private syncing: Promise<void> | null = null;
@@ -632,6 +746,12 @@ class Database {
 
     this.syncing = (async () => {
       try {
+        /* Deletions first. `pgUpsert` only ever writes rows that are still in
+           memory, so a row removed here would otherwise survive in Postgres
+           and come back on the next cold start. Draining the queue before the
+           upserts also means a delete + recreate of the same id in one tick
+           ends in the correct final state. */
+        await this.drainPendingDeletes();
         await pgUpsert(PG_TABLES.users, [...this.users.values()], 'id');
         await pgUpsert(PG_TABLES.licenses, [...this.licenses.values()], 'id');
         await pgUpsert(PG_TABLES.scannerConfigs, [...this.scannerConfigs.values()], 'slug');
@@ -843,6 +963,45 @@ class Database {
   }
 
   /**
+   * MODULE 3  Delete a user permanently.
+   *
+   * §3.1  Removes the row from memory, from the on-disk snapshot and — via the
+   * delete queue — from Supabase Postgres, so the next cold start cannot
+   * resurrect them.
+   *
+   * Two deliberate guards:
+   *   • The last remaining admin cannot be deleted. Doing so would leave the
+   *     portal permanently unreachable with no way back in.
+   *   • The user's license key is *released*, not deleted. It returns to the
+   *     vault as an unassigned key the admin can hand to someone else; the
+   *     customer's access ends either way because their account is gone.
+   */
+  deleteUser(userId: string): { ok: true } | { ok: false; error: string } {
+    const user = this.userById(userId);
+    if (!user) return { ok: false, error: 'NOT_FOUND' };
+
+    if (user.role === 'ADMIN') {
+      const admins = [...this.users.values()].filter((u) => u.role === 'ADMIN').length;
+      if (admins <= 1) return { ok: false, error: 'LAST_ADMIN' };
+    }
+
+    /* Release the key so it can be reassigned, and clear its device locks so
+       the next holder is not blocked by the previous one's fingerprints. */
+    if (user.licenseKeyId) {
+      const lic = this.licenses.get(user.licenseKeyId);
+      if (lic) {
+        lic.assignedUserId = null;
+        lic.activeDeviceHashes = [];
+      }
+    }
+
+    this.users.delete(userId);
+    this.queueDelete(PG_TABLES.users, 'id', userId);
+    this.persist();
+    return { ok: true };
+  }
+
+  /**
    * MODULE 3  Delete a key. Refuses anything that is currently assigned AND
    * active — deleting those would lock a paying customer out with no audit
    * trail of who did it.
@@ -860,8 +1019,119 @@ class Database {
       if (u && u.licenseKeyId === lic.id) u.licenseKeyId = null;
     }
     this.licenses.delete(licenseId);
+    /* §3.1  Mirror the removal, or hydration brings the key back. */
+    this.queueDelete(PG_TABLES.licenses, 'id', licenseId);
     this.persist();
     return { ok: true };
+  }
+
+  /* --------------------------- §2.2  admin TOTP --------------------------- */
+
+  /**
+   * §2.2  Returns (creating on first call) the admin's TOTP setup material.
+   *
+   * The secret is generated once and then kept, so re-opening the pairing
+   * wizard shows the *same* QR code rather than silently invalidating one the
+   * admin may have already scanned. `totpEnabled` stays false until a code from
+   * this secret has been verified — that is what guarantees no lockout: seeing
+   * the QR code never by itself turns on the requirement.
+   */
+  totpSetup(userId: string): { secret: string; uri: string; enabled: boolean } | null {
+    const u = this.userById(userId);
+    if (!u) return null;
+    if (!u.totpSecret) {
+      u.totpSecret = generateTotpSecret();
+      this.persist();
+    }
+    return {
+      secret: u.totpSecret,
+      uri: totpUri({ secret: u.totpSecret, accountName: u.username }),
+      enabled: u.totpEnabled === true,
+    };
+  }
+
+  /** §2.2  Regenerates the secret. Always disables 2FA — see rotate note below. */
+  rotateTotpSecret(userId: string): { secret: string; uri: string; enabled: boolean } | null {
+    const u = this.userById(userId);
+    if (!u) return null;
+    u.totpSecret = generateTotpSecret();
+    /* A rotated secret invalidates the phone that is currently paired, so the
+       requirement is switched off until the new QR has been verified. Leaving
+       it on would lock the admin out with a code they can no longer produce. */
+    u.totpEnabled = false;
+    u.totpLastCounter = null;
+    this.persist();
+    return {
+      secret: u.totpSecret,
+      uri: totpUri({ secret: u.totpSecret, accountName: u.username }),
+      enabled: false,
+    };
+  }
+
+  /**
+   * §2.2  Verifies a code for **sign-in**, with replay protection.
+   *
+   * Replay protection is deliberately scoped to authentication. A code that has
+   * already been spent to log in is refused, so a code captured over the
+   * shoulder cannot be replayed inside its 30-second window.
+   *
+   * It is *not* applied to the management actions below. Those run against an
+   * already-authenticated admin session, and gating them on the counter made
+   * legitimate sequences fail: enabling 2FA consumed the step's counter, so
+   * disabling or re-verifying during the same 30 seconds was rejected.
+   */
+  verifyTotpForLogin(userId: string, code: string): { ok: boolean; error?: string } {
+    const u = this.userById(userId);
+    if (!u) return { ok: false, error: 'NOT_FOUND' };
+    if (!u.totpSecret) return { ok: false, error: 'NO_SECRET' };
+
+    const result = verifyTotp(u.totpSecret, code, { lastCounter: u.totpLastCounter ?? undefined });
+    if (!result.ok) return { ok: false, error: 'BAD_CODE' };
+
+    u.totpLastCounter = result.counter ?? null;
+    this.persist();
+    return { ok: true };
+  }
+
+  /** §2.2  Verifies a code and turns the requirement on. */
+  verifyAndEnableTotp(userId: string, code: string): { ok: boolean; error?: string } {
+    const u = this.userById(userId);
+    if (!u) return { ok: false, error: 'NOT_FOUND' };
+    if (!u.totpSecret) return { ok: false, error: 'NO_SECRET' };
+    if (!verifyTotp(u.totpSecret, code).ok) return { ok: false, error: 'BAD_CODE' };
+
+    u.totpEnabled = true;
+    this.persist();
+    return { ok: true };
+  }
+
+  /**
+   * §2.2  Turns the requirement off.
+   *
+   * When 2FA is on, a valid current code is required first — otherwise anyone
+   * holding an admin session could silently strip the owner's only second
+   * factor.
+   */
+  disableTotp(userId: string, code?: string): { ok: boolean; error?: string } {
+    const u = this.userById(userId);
+    if (!u) return { ok: false, error: 'NOT_FOUND' };
+    if (u.totpEnabled === true) {
+      if (!code) return { ok: false, error: 'CODE_REQUIRED' };
+      if (!u.totpSecret) return { ok: false, error: 'NO_SECRET' };
+      if (!verifyTotp(u.totpSecret, code).ok) return { ok: false, error: 'BAD_CODE' };
+    }
+    u.totpEnabled = false;
+    this.persist();
+    return { ok: true };
+  }
+
+  /** §2.2  Validates a code against the user's stored secret (no state change). */
+  checkTotp(userId: string, code: string): { ok: boolean; error?: string } {
+    const u = this.userById(userId);
+    if (!u) return { ok: false, error: 'NOT_FOUND' };
+    if (!u.totpSecret) return { ok: false, error: 'NO_SECRET' };
+    const result = verifyTotp(u.totpSecret, code);
+    return result.ok ? { ok: true } : { ok: false, error: 'BAD_CODE' };
   }
 
   /** MODULE 3/4  Bind (or swap) a key onto a user, syncing entitlements. */

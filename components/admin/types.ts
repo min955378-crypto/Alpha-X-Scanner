@@ -87,6 +87,7 @@ export const MODULES: ModuleDef[] = [
   { id: 'onboarding', label: 'Customer Onboarding Studio', icon: '🚀', blurb: 'Create a customer + key in one click' },
   { id: 'licenses', label: 'License Key Vault', icon: '🔑', blurb: 'Batch mint, extend, revoke, device locks' },
   { id: 'users', label: 'Users & Session Matrix', icon: '👥', blurb: 'Passwords, keys, suspension' },
+  { id: 'security2fa', label: 'Authenticator 2FA & Admin Security', icon: '📲', blurb: 'Pair your app, rotate secrets, change credentials' },
   { id: 'scanners', label: 'Scanner Math Tuner', icon: '⚙', blurb: 'Strategy parameters & hot-reload' },
   { id: 'coins', label: 'Coin Universe & VIP Signals', icon: '🪙', blurb: 'Monitoring tags and manual signals' },
   { id: 'risk', label: 'Binance Risk Watch CMS', icon: '⚠', blurb: 'Delistings, notices and spot news' },

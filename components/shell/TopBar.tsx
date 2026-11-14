@@ -172,8 +172,8 @@ export function TopBar() {
               className="flex items-center gap-1.5 rounded border border-emerald-500/55 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400 hover:bg-emerald-500/20"
             >
               <Icon name="external" size={11} />
-              <span className="hidden sm:inline">Live Trading Terminal</span>
-              <span className="sm:hidden">Terminal</span>
+              <span className="hidden sm:inline">← Live Trading Terminal</span>
+              <span className="sm:hidden">← Terminal</span>
             </Link>
           ) : (
             <Link
@@ -183,8 +183,8 @@ export function TopBar() {
               style={{ boxShadow: '0 0 12px rgba(245, 179, 1, 0.28)' }}
             >
               <Icon name="shieldAlert" size={11} className="text-amber-300" />
-              <span className="hidden sm:inline">Command Center</span>
-              <span className="sm:hidden">Admin</span>
+              <span className="hidden sm:inline">⚡ Admin Portal</span>
+              <span className="sm:hidden">⚡ Admin</span>
               <kbd className="mono-num hidden rounded border border-amber-400/40 px-1 text-[8.5px] font-semibold text-amber-300/80 lg:inline">
                 ⌘⇧A
               </kbd>
