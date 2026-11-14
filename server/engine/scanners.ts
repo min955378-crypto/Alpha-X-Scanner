@@ -11,6 +11,7 @@ import {
 } from '@/lib/types';
 import { alphaSniperWrGate, computeScore, htfAlignment } from '@/lib/score';
 import { MarketStore, SymbolState, TfAnalysis } from './store';
+import { getScanParams, type ScanParams } from './scanparams';
 
 /**
  * §7.2  Canonical long/short math for all five scanners.
@@ -29,6 +30,10 @@ export interface ScanContext {
   htfSnap: CoinSnapshot;
   a: TfAnalysis;
   htfA: TfAnalysis;
+  /** MODULE 5  Live parameters from the Admin Math Tuner (clamped + defaults). */
+  P: ScanParams;
+  /** MODULE 5  Intrabar EMA for an arbitrary (admin-tuned) period. */
+  liveEma: (period: number) => number;
 }
 
 const VALID_MS = 30 * 60 * 1000;
@@ -86,7 +91,12 @@ function finalize(
 
   // §7.2 #5  Alpha Sniper zero-division-safe win-rate gate.
   if (slug === 'alpha-sniper') {
-    const gate = alphaSniperWrGate(snap.wr500, snap.closedTrades500);
+    const gate = alphaSniperWrGate(
+      snap.wr500,
+      snap.closedTrades500,
+      ctx.P.minWinRate500,
+      Math.round(ctx.P.minClosedTrades),
+    );
     reasons.push(gate.label);
     if (gate.adjustment !== 0) {
       breakdown = {
@@ -125,33 +135,42 @@ function finalize(
 /* -------------------------------------------------------------------------- */
 
 function v1Scaling(ctx: ScanContext): ScannerSignal[] {
-  const { snap, a } = ctx;
+  const { snap, a, P } = ctx;
+  const slMult = P.atrSlMult;
+  const tp1Mult = P.atrTp1Mult;
+  const tp2Mult = P.atrTp2Mult;
+  /* The POTENTIAL stage has always used a softer 1.25× RVOL floor than the
+     1.50× confirmation gate; keep that 5/6 ratio so tuning rvolMin scales the
+     whole ladder without changing the factory behaviour. */
+  const rvolSoft = P.rvolMin * (5 / 6);
+  const shortBandLo = P.rsiSweetMin + (P.rsiSweetMax - P.rsiSweetMin) / 3;
+  const shortBandHi = P.rsiMin - (P.rsiMin - shortBandLo) / 3;
   const prevBar = a.candles[a.candles.length - 1];
   if (!prevBar) return [];
   const c = snap.price;
   const out: ScannerSignal[] = [];
 
   /* ------------------------------- LONG ---------------------------------- */
-  if (snap.rsi >= 50 && snap.rsi < 52 && snap.rsiDelta > 0 && c > snap.ema50 && snap.rvol >= 1.25) {
+  if (snap.rsi >= P.rsiMin && snap.rsi < P.rsiSweetMin && snap.rsiDelta > 0 && c > snap.ema50 && snap.rvol >= rvolSoft) {
     out.push(
       finalize('v1-scaling', ctx, {
         direction: 'LONG',
         stage: 'POTENTIAL',
         entry: c,
-        sl: c - 1.2 * snap.atr,
-        tp1: c + 1.8 * snap.atr,
-        tp2: c + 3.0 * snap.atr,
+        sl: c - slMult * snap.atr,
+        tp1: c + tp1Mult * snap.atr,
+        tp2: c + tp2Mult * snap.atr,
         reasons: [
-          `RSI ${snap.rsi.toFixed(1)} entering the 50–52 momentum shelf`,
+          `RSI ${snap.rsi.toFixed(1)} entering the ${P.rsiMin}–${P.rsiSweetMin} momentum shelf`,
           `RSI rising (+${snap.rsiDelta.toFixed(2)} in the last cycle)`,
           `Price above EMA50`,
-          `RVOL ${snap.rvol.toFixed(2)}× ≥ 1.25×`,
+          `RVOL ${snap.rvol.toFixed(2)}× ≥ ${rvolSoft.toFixed(2)}×`,
         ],
       }),
     );
   } else if (
-    snap.rsi >= 52 &&
-    snap.rsi <= 55 &&
+    snap.rsi >= P.rsiSweetMin &&
+    snap.rsi <= P.rsiSweetMax &&
     c > snap.ema21 &&
     snap.ema21 > snap.ema50 &&
     Math.abs(c - prevBar.h) / prevBar.h <= 0.003
@@ -161,63 +180,63 @@ function v1Scaling(ctx: ScanContext): ScannerSignal[] {
         direction: 'LONG',
         stage: 'WAITING',
         entry: c,
-        sl: c - 1.2 * snap.atr,
-        tp1: c + 1.8 * snap.atr,
-        tp2: c + 3.0 * snap.atr,
+        sl: c - slMult * snap.atr,
+        tp1: c + tp1Mult * snap.atr,
+        tp2: c + tp2Mult * snap.atr,
         reasons: [
-          `RSI ${snap.rsi.toFixed(1)} inside the 52–55 rising sweet spot`,
+          `RSI ${snap.rsi.toFixed(1)} inside the ${P.rsiSweetMin}–${P.rsiSweetMax} rising sweet spot`,
           `Price within 0.3% of the prior bar high (${prevBar.h.toPrecision(6)})`,
           `EMA21 > EMA50 stacked`,
         ],
       }),
     );
   } else if (
-    snap.rsi >= 52.5 &&
-    snap.rsi <= 58.5 &&
+    snap.rsi >= P.rsiSweetMin &&
+    snap.rsi <= P.rsiMax &&
     c > prevBar.h &&
     snap.ema9 > snap.ema21 &&
     snap.ema21 > snap.ema50 &&
-    snap.rvol >= 1.5
+    snap.rvol >= P.rvolMin
   ) {
     out.push(
       finalize('v1-scaling', ctx, {
         direction: 'LONG',
         stage: 'ENTRY_READY',
         entry: c,
-        sl: c - 1.2 * snap.atr,
-        tp1: c + 1.8 * snap.atr,
-        tp2: c + 3.0 * snap.atr,
+        sl: c - slMult * snap.atr,
+        tp1: c + tp1Mult * snap.atr,
+        tp2: c + tp2Mult * snap.atr,
         reasons: [
           `Broke the prior bar high — breakout confirmed`,
-          `RSI ${snap.rsi.toFixed(1)} in the 52.5–58.5 trigger band`,
+          `RSI ${snap.rsi.toFixed(1)} in the ${P.rsiSweetMin}–${P.rsiMax} trigger band`,
           `EMA9 > EMA21 > EMA50 full stack`,
-          `RVOL ${snap.rvol.toFixed(2)}× ≥ 1.50×`,
+          `RVOL ${snap.rvol.toFixed(2)}× ≥ ${P.rvolMin.toFixed(2)}×`,
         ],
       }),
     );
   }
 
   /* ------------------------------- SHORT --------------------------------- */
-  if (snap.rsi > 48 && snap.rsi <= 50 && snap.rsiDelta < 0 && c < snap.ema50 && snap.rvol >= 1.25) {
+  if (snap.rsi > 100 - P.rsiSweetMin && snap.rsi <= 100 - P.rsiMin && snap.rsiDelta < 0 && c < snap.ema50 && snap.rvol >= rvolSoft) {
     out.push(
       finalize('v1-scaling', ctx, {
         direction: 'SHORT',
         stage: 'POTENTIAL',
         entry: c,
-        sl: c + 1.2 * snap.atr,
-        tp1: c - 1.8 * snap.atr,
-        tp2: c - 3.0 * snap.atr,
+        sl: c + slMult * snap.atr,
+        tp1: c - tp1Mult * snap.atr,
+        tp2: c - tp2Mult * snap.atr,
         reasons: [
-          `RSI ${snap.rsi.toFixed(1)} rolling off the 50 line`,
+          `RSI ${snap.rsi.toFixed(1)} rolling off the ${100 - P.rsiMin} line`,
           `RSI falling (${snap.rsiDelta.toFixed(2)} this cycle)`,
           `Price below EMA50`,
-          `RVOL ${snap.rvol.toFixed(2)}× ≥ 1.25×`,
+          `RVOL ${snap.rvol.toFixed(2)}× ≥ ${rvolSoft.toFixed(2)}×`,
         ],
       }),
     );
   } else if (
-    snap.rsi >= 45 &&
-    snap.rsi <= 48 &&
+    snap.rsi >= 100 - P.rsiSweetMax &&
+    snap.rsi <= 100 - P.rsiSweetMin &&
     c < snap.ema21 &&
     snap.ema21 < snap.ema50 &&
     Math.abs(c - prevBar.l) / prevBar.l <= 0.003
@@ -227,37 +246,37 @@ function v1Scaling(ctx: ScanContext): ScannerSignal[] {
         direction: 'SHORT',
         stage: 'WAITING',
         entry: c,
-        sl: c + 1.2 * snap.atr,
-        tp1: c - 1.8 * snap.atr,
-        tp2: c - 3.0 * snap.atr,
+        sl: c + slMult * snap.atr,
+        tp1: c - tp1Mult * snap.atr,
+        tp2: c - tp2Mult * snap.atr,
         reasons: [
-          `RSI ${snap.rsi.toFixed(1)} inside the 45–48 falling band`,
+          `RSI ${snap.rsi.toFixed(1)} inside the ${100 - P.rsiSweetMax}–${100 - P.rsiSweetMin} falling band`,
           `Price within 0.3% of the prior bar low`,
           `EMA21 < EMA50 stacked`,
         ],
       }),
     );
   } else if (
-    snap.rsi >= 41.5 &&
-    snap.rsi <= 47.5 &&
+    snap.rsi >= 100 - P.rsiMax &&
+    snap.rsi <= shortBandHi &&
     c < prevBar.l &&
     snap.ema9 < snap.ema21 &&
     snap.ema21 < snap.ema50 &&
-    snap.rvol >= 1.5
+    snap.rvol >= P.rvolMin
   ) {
     out.push(
       finalize('v1-scaling', ctx, {
         direction: 'SHORT',
         stage: 'ENTRY_READY',
         entry: c,
-        sl: c + 1.2 * snap.atr,
-        tp1: c - 1.8 * snap.atr,
-        tp2: c - 3.0 * snap.atr,
+        sl: c + slMult * snap.atr,
+        tp1: c - tp1Mult * snap.atr,
+        tp2: c - tp2Mult * snap.atr,
         reasons: [
           `Lost the prior bar low — breakdown confirmed`,
-          `RSI ${snap.rsi.toFixed(1)} in the 41.5–47.5 trigger band`,
+          `RSI ${snap.rsi.toFixed(1)} in the ${(100 - P.rsiMax).toFixed(1)}–${shortBandHi.toFixed(1)} trigger band`,
           `EMA9 < EMA21 < EMA50 full stack`,
-          `RVOL ${snap.rvol.toFixed(2)}× ≥ 1.50×`,
+          `RVOL ${snap.rvol.toFixed(2)}× ≥ ${P.rvolMin.toFixed(2)}×`,
         ],
       }),
     );
@@ -271,7 +290,9 @@ function v1Scaling(ctx: ScanContext): ScannerSignal[] {
 /* -------------------------------------------------------------------------- */
 
 function orderBlock(ctx: ScanContext): ScannerSignal[] {
-  const { snap, a, st, tf } = ctx;
+  const { snap, a, st, tf, P } = ctx;
+  const nearAtr = P.minAtrWidth;
+  const minWick = P.rejectionWickPct / 100;
   const ob = a.ob;
   if (!ob || !snap.atr) return [];
 
@@ -280,7 +301,7 @@ function orderBlock(ctx: ScanContext): ScannerSignal[] {
   const zoneMid = (ob.hi + ob.lo) / 2;
   const distPct = ((c - zoneMid) / zoneMid) * 100;
   const inside = c >= ob.lo && c <= ob.hi;
-  const nearBoundary = Math.min(Math.abs(c - ob.lo), Math.abs(c - ob.hi)) <= 0.15 * snap.atr;
+  const nearBoundary = Math.min(Math.abs(c - ob.lo), Math.abs(c - ob.hi)) <= nearAtr * snap.atr;
   const wick = ob.type === 'DEMAND' ? lowerWickRatio(forming) : upperWickRatio(forming);
 
   const base = {
@@ -304,13 +325,13 @@ function orderBlock(ctx: ScanContext): ScannerSignal[] {
     `Validated by BOS + Fair Value Gap`,
   ];
 
-  if (inside && wick >= 0.45 && snap.rvol >= 1.3) {
+  if (inside && wick >= minWick && snap.rvol >= P.rvolMin) {
     stage = 'ENTRY_READY';
-    reasons.push(`Rejection wick ${(wick * 100).toFixed(0)}% of the bar range ≥ 45%`);
-    reasons.push(`RVOL ${snap.rvol.toFixed(2)}× ≥ 1.30×`);
+    reasons.push(`Rejection wick ${(wick * 100).toFixed(0)}% of the bar range ≥ ${P.rejectionWickPct}%`);
+    reasons.push(`RVOL ${snap.rvol.toFixed(2)}× ≥ ${P.rvolMin.toFixed(2)}×`);
   } else if (nearBoundary) {
     stage = 'WAITING';
-    reasons.push(`Price within 0.15×ATR of the zone boundary`);
+    reasons.push(`Price within ${P.minAtrWidth}×ATR of the zone boundary`);
   } else if (Math.abs(distPct) <= 2.0) {
     stage = 'POTENTIAL';
     reasons.push(`Unmitigated zone ${Math.abs(distPct).toFixed(2)}% away`);
@@ -337,17 +358,26 @@ function orderBlock(ctx: ScanContext): ScannerSignal[] {
 /* -------------------------------------------------------------------------- */
 
 function emaCrossover(ctx: ScanContext): ScannerSignal[] {
-  const { snap, a, st, tf } = ctx;
+  const { snap, a, st, tf, P, liveEma } = ctx;
+  const emaP = P;
   const c = snap.price;
 
-  // Live (intrabar) EMA values vs the values confirmed at the last close.
-  const closedEma9 = a.ema[9];
-  const closedEma21 = a.ema[21];
-  const closedEma50 = a.ema[50];
+  /* MODULE 5  Fast/mid/slow periods come from the Admin Math Tuner. */
+  const fast = Math.round(P.fastEma);
+  const mid = Math.round(P.midEma);
+  const slow = Math.round(P.slowEma);
+  const fastLive = liveEma(fast);
+  const midLive = liveEma(mid);
+  const slowLive = liveEma(slow);
 
-  const crossedUp = closedEma9 <= closedEma21 && snap.ema9 > snap.ema21;
-  const crossedDown = closedEma9 >= closedEma21 && snap.ema9 < snap.ema21;
-  const testingEma21 = Math.abs(c - snap.ema21) <= 0.25 * snap.atr;
+  // Live (intrabar) EMA values vs the values confirmed at the last close.
+  const closedEma9 = a.ema[fast] ?? fastLive;
+  const closedEma21 = a.ema[mid] ?? midLive;
+  const closedEma50 = a.ema[slow] ?? slowLive;
+
+  const crossedUp = closedEma9 <= closedEma21 && fastLive > midLive;
+  const crossedDown = closedEma9 >= closedEma21 && fastLive < midLive;
+  const testingEma21 = Math.abs(c - midLive) <= P.pullbackAtrBand * snap.atr;
 
   const nearHigh = snap.high24h > 0 && Math.abs(c - snap.high24h) / snap.high24h <= 0.01;
   const nearLow = snap.low24h > 0 && Math.abs(c - snap.low24h) / snap.low24h <= 0.01;
@@ -360,17 +390,17 @@ function emaCrossover(ctx: ScanContext): ScannerSignal[] {
     tp2: dir === 'LONG' ? c + 2.8 * snap.atr : c - 2.8 * snap.atr,
   });
 
-  if (crossedUp || (snap.ema9 > snap.ema21 && snap.ema21 > snap.ema50 && closedEma9 > closedEma21 && closedEma21 > closedEma50)) {
-    if (snap.rvol >= 1.25 && !nearHigh) {
+  if (crossedUp || (fastLive > midLive && midLive > slowLive && closedEma9 > closedEma21 && closedEma21 > closedEma50)) {
+    if (snap.rvol >= emaP.rvolMin && !nearHigh) {
       out.push(
         finalize('ema-crossover', ctx, {
           direction: 'LONG',
           stage: 'ENTRY_READY',
           ...levels('LONG'),
           reasons: [
-            crossedUp ? 'Fresh EMA9 × EMA21 crossover' : 'EMA stack confirmed on the last close',
-            'EMA9 > EMA21 > EMA50',
-            `RVOL ${snap.rvol.toFixed(2)}× ≥ 1.25×`,
+            crossedUp ? `Fresh EMA${fast} × EMA${mid} crossover` : 'EMA stack confirmed on the last close',
+            `EMA${fast} > EMA${mid} > EMA${slow}`,
+            `RVOL ${snap.rvol.toFixed(2)}× ≥ ${emaP.rvolMin.toFixed(2)}×`,
             'Not extended into the 24h high',
           ],
         }),
@@ -382,31 +412,33 @@ function emaCrossover(ctx: ScanContext): ScannerSignal[] {
         direction: 'LONG',
         stage: 'WAITING',
         ...levels('LONG'),
-        reasons: crossedUp ? ['Intrabar EMA9 × EMA21 crossover'] : ['Price testing EMA21 (±0.25×ATR)'],
+        reasons: crossedUp
+            ? ['Intrabar EMA9 × EMA21 crossover']
+            : [`Price testing EMA21 (±${emaP.pullbackAtrBand}×ATR)`],
       }),
     );
-  } else if (Math.abs(snap.ema9 - snap.ema21) <= 0.2 * snap.atr || (snap.ema9 > snap.ema21 && snap.ema21 > snap.ema50 && testingEma21)) {
+  } else if (Math.abs(fastLive - midLive) <= 0.2 * snap.atr || (fastLive > midLive && midLive > slowLive && testingEma21)) {
     out.push(
       finalize('ema-crossover', ctx, {
         direction: 'LONG',
         stage: 'POTENTIAL',
         ...levels('LONG'),
-        reasons: ['EMA9 coiling within 0.20×ATR of EMA21', 'Uptrend stack intact, awaiting the cross'],
+        reasons: [`EMA${fast} coiling within 0.20×ATR of EMA${mid}`, 'Uptrend stack intact, awaiting the cross'],
       }),
     );
   }
 
-  if (crossedDown || (snap.ema9 < snap.ema21 && snap.ema21 < snap.ema50 && closedEma9 < closedEma21 && closedEma21 < closedEma50)) {
-    if (snap.rvol >= 1.25 && !nearLow) {
+  if (crossedDown || (fastLive < midLive && midLive < slowLive && closedEma9 < closedEma21 && closedEma21 < closedEma50)) {
+    if (snap.rvol >= emaP.rvolMin && !nearLow) {
       out.push(
         finalize('ema-crossover', ctx, {
           direction: 'SHORT',
           stage: 'ENTRY_READY',
           ...levels('SHORT'),
           reasons: [
-            crossedDown ? 'Fresh EMA9 × EMA21 crossunder' : 'EMA stack confirmed on the last close',
-            'EMA9 < EMA21 < EMA50',
-            `RVOL ${snap.rvol.toFixed(2)}× ≥ 1.25×`,
+            crossedDown ? `Fresh EMA${fast} × EMA${mid} crossunder` : 'EMA stack confirmed on the last close',
+            `EMA${fast} < EMA${mid} < EMA${slow}`,
+            `RVOL ${snap.rvol.toFixed(2)}× ≥ ${emaP.rvolMin.toFixed(2)}×`,
             'Not extended into the 24h low',
           ],
         }),
@@ -418,16 +450,18 @@ function emaCrossover(ctx: ScanContext): ScannerSignal[] {
         direction: 'SHORT',
         stage: 'WAITING',
         ...levels('SHORT'),
-        reasons: crossedDown ? ['Intrabar EMA9 × EMA21 crossunder'] : ['Price testing EMA21 (±0.25×ATR)'],
+        reasons: crossedDown
+            ? ['Intrabar EMA9 × EMA21 crossunder']
+            : [`Price testing EMA21 (±${emaP.pullbackAtrBand}×ATR)`],
       }),
     );
-  } else if (Math.abs(snap.ema9 - snap.ema21) <= 0.2 * snap.atr || (snap.ema9 < snap.ema21 && snap.ema21 < snap.ema50 && testingEma21)) {
+  } else if (Math.abs(fastLive - midLive) <= 0.2 * snap.atr || (fastLive < midLive && midLive < slowLive && testingEma21)) {
     out.push(
       finalize('ema-crossover', ctx, {
         direction: 'SHORT',
         stage: 'POTENTIAL',
         ...levels('SHORT'),
-        reasons: ['EMA9 coiling within 0.20×ATR of EMA21', 'Downtrend stack intact, awaiting the cross'],
+        reasons: [`EMA${fast} coiling within 0.20×ATR of EMA${mid}`, 'Downtrend stack intact, awaiting the cross'],
       }),
     );
   }
@@ -440,7 +474,7 @@ function emaCrossover(ctx: ScanContext): ScannerSignal[] {
 /* -------------------------------------------------------------------------- */
 
 function hiddenBullish(ctx: ScanContext): ScannerSignal[] {
-  const { snap, a } = ctx;
+  const { snap, a, P } = ctx;
   const hb = a.hb;
   if (!hb) return [];
   const c = snap.price;
@@ -455,7 +489,7 @@ function hiddenBullish(ctx: ScanContext): ScannerSignal[] {
   if (hb.type === 'BULL') {
     const brokeMss = c > hb.mss;
     const rsiTurned = snap.rsi >= snap.rsiPrev + 1.5;
-    if (brokeMss && c > snap.ema9 && snap.rvol >= 1.2) {
+    if (brokeMss && c > snap.ema9 && snap.rvol >= P.rvolMin) {
       return [
         finalize('hidden-bullish', ctx, {
           direction: 'LONG',
@@ -465,7 +499,7 @@ function hiddenBullish(ctx: ScanContext): ScannerSignal[] {
             'Price closed above the micro-swing high (MSS break)',
             `Hidden bullish divergence: higher low + lower RSI low at ${hb.rsiAtT2.toFixed(1)}`,
             'Price above EMA9',
-            `RVOL ${snap.rvol.toFixed(2)}× ≥ 1.20×`,
+            `RVOL ${snap.rvol.toFixed(2)}× ≥ ${P.rvolMin.toFixed(2)}×`,
           ],
         }),
       ];
@@ -489,7 +523,7 @@ function hiddenBullish(ctx: ScanContext): ScannerSignal[] {
         stage: 'POTENTIAL',
         ...levels('LONG'),
         reasons: [
-          'Hidden bullish divergence detected in the RSI 30–40 zone',
+          `Hidden bullish divergence detected in the RSI ${P.bullRsiMin}–${P.bullRsiMax} zone`,
           `Swing low ${hb.t1} → ${hb.t2} formed a higher low`,
         ],
       }),
@@ -498,7 +532,7 @@ function hiddenBullish(ctx: ScanContext): ScannerSignal[] {
 
   const brokeMss = c < hb.mss;
   const rsiTurned = snap.rsi <= snap.rsiPrev - 1.5;
-  if (brokeMss && c < snap.ema9 && snap.rvol >= 1.2) {
+  if (brokeMss && c < snap.ema9 && snap.rvol >= P.rvolMin) {
     return [
       finalize('hidden-bullish', ctx, {
         direction: 'SHORT',
@@ -508,7 +542,7 @@ function hiddenBullish(ctx: ScanContext): ScannerSignal[] {
           'Price closed below the micro-swing low (MSS break)',
           `Hidden bearish divergence: lower high + higher RSI high at ${hb.rsiAtT2.toFixed(1)}`,
           'Price below EMA9',
-          `RVOL ${snap.rvol.toFixed(2)}× ≥ 1.20×`,
+          `RVOL ${snap.rvol.toFixed(2)}× ≥ ${P.rvolMin.toFixed(2)}×`,
         ],
       }),
     ];
@@ -529,7 +563,7 @@ function hiddenBullish(ctx: ScanContext): ScannerSignal[] {
       stage: 'POTENTIAL',
       ...levels('SHORT'),
       reasons: [
-        'Hidden bearish divergence detected in the RSI 60–70 zone',
+        `Hidden bearish divergence detected in the RSI ${P.bearRsiMin}–${P.bearRsiMax} zone`,
         `Swing high ${hb.t1} → ${hb.t2} formed a lower high`,
       ],
     }),
@@ -541,7 +575,7 @@ function hiddenBullish(ctx: ScanContext): ScannerSignal[] {
 /* -------------------------------------------------------------------------- */
 
 function alphaSniper(ctx: ScanContext): ScannerSignal[] {
-  const { snap, st, tf } = ctx;
+  const { snap, st, tf, P, liveEma } = ctx;
   const forming = st.tf[tf].candles[st.tf[tf].candles.length - 1];
   const a = snap.alphaSniper;
   const aPrev = snap.alphaSniperPrev;
@@ -555,21 +589,27 @@ function alphaSniper(ctx: ScanContext): ScannerSignal[] {
     tp2: dir === 'LONG' ? c + 3.0 * snap.atr : c - 3.0 * snap.atr,
   });
 
-  const crossUp30 = aPrev <= 30 && a > 30;
-  const crossUp50 = aPrev <= 50 && a > 50;
-  const crossDown70 = aPrev >= 70 && a < 70;
-  const crossDown50 = aPrev >= 50 && a < 50;
+  const loBand = P.lowerBand;
+  const hiBand = P.upperBand;
+  const midBand = (P.lowerBand + P.upperBand) / 2;
+  const crossUp30 = aPrev <= loBand && a > loBand;
+  const crossUp50 = aPrev <= midBand && a > midBand;
+  const crossDown70 = aPrev >= hiBand && a < hiBand;
+  const crossDown50 = aPrev >= midBand && a < midBand;
 
   /* LONG */
-  if ((crossUp30 || crossUp50) && snap.ema13 >= snap.ema34 && c > forming.o) {
+  const fastTrend = liveEma(Math.round(P.fastTrendEma));
+  const slowTrend = liveEma(Math.round(P.slowTrendEma));
+
+  if ((crossUp30 || crossUp50) && fastTrend >= slowTrend && c > forming.o) {
     out.push(
       finalize('alpha-sniper', ctx, {
         direction: 'LONG',
         stage: 'ENTRY_READY',
         ...levels('LONG'),
         reasons: [
-          `Alpha Sniper crossed ${crossUp30 ? '30' : '50'} upward (${a.toFixed(1)})`,
-          'EMA13 ≥ EMA34 alignment',
+          `Alpha Sniper crossed ${crossUp30 ? loBand.toFixed(1) : midBand.toFixed(1)} upward (${a.toFixed(1)})`,
+          `EMA${Math.round(P.fastTrendEma)} ≥ EMA${Math.round(P.slowTrendEma)} alignment`,
           'Bullish candle body',
         ],
       }),
@@ -580,30 +620,33 @@ function alphaSniper(ctx: ScanContext): ScannerSignal[] {
         direction: 'LONG',
         stage: 'WAITING',
         ...levels('LONG'),
-        reasons: ['Alpha Sniper crossing 30 upward', 'Awaiting EMA13/EMA34 alignment'],
+        reasons: [`Alpha Sniper crossing ${loBand} upward`, 'Awaiting trend-EMA alignment'],
       }),
     );
-  } else if (a < 33 && a > aPrev) {
+  } else if (a < loBand + (midBand - loBand) / 6 && a > aPrev) {
     out.push(
       finalize('alpha-sniper', ctx, {
         direction: 'LONG',
         stage: 'POTENTIAL',
         ...levels('LONG'),
-        reasons: [`Alpha Sniper ${a.toFixed(1)} curling up below 33`, 'Channel extreme forming'],
+        reasons: [
+          `Alpha Sniper ${a.toFixed(1)} curling up below ${(loBand + (midBand - loBand) / 6).toFixed(1)}`,
+          'Channel extreme forming',
+        ],
       }),
     );
   }
 
   /* SHORT */
-  if ((crossDown70 || crossDown50) && snap.ema13 <= snap.ema34 && c < forming.o) {
+  if ((crossDown70 || crossDown50) && fastTrend <= slowTrend && c < forming.o) {
     out.push(
       finalize('alpha-sniper', ctx, {
         direction: 'SHORT',
         stage: 'ENTRY_READY',
         ...levels('SHORT'),
         reasons: [
-          `Alpha Sniper crossed ${crossDown70 ? '70' : '50'} downward (${a.toFixed(1)})`,
-          'EMA13 ≤ EMA34 alignment',
+          `Alpha Sniper crossed ${crossDown70 ? hiBand.toFixed(1) : midBand.toFixed(1)} downward (${a.toFixed(1)})`,
+          `EMA${Math.round(P.fastTrendEma)} ≤ EMA${Math.round(P.slowTrendEma)} alignment`,
           'Bearish candle body',
         ],
       }),
@@ -614,16 +657,19 @@ function alphaSniper(ctx: ScanContext): ScannerSignal[] {
         direction: 'SHORT',
         stage: 'WAITING',
         ...levels('SHORT'),
-        reasons: ['Alpha Sniper crossing 70 downward', 'Awaiting EMA13/EMA34 alignment'],
+        reasons: [`Alpha Sniper crossing ${hiBand} downward`, 'Awaiting trend-EMA alignment'],
       }),
     );
-  } else if (a > 67 && a < aPrev) {
+  } else if (a > hiBand - (hiBand - midBand) / 6 && a < aPrev) {
     out.push(
       finalize('alpha-sniper', ctx, {
         direction: 'SHORT',
         stage: 'POTENTIAL',
         ...levels('SHORT'),
-        reasons: [`Alpha Sniper ${a.toFixed(1)} curling down above 67`, 'Channel extreme forming'],
+        reasons: [
+          `Alpha Sniper ${a.toFixed(1)} curling down above ${(hiBand - (hiBand - midBand) / 6).toFixed(1)}`,
+          'Channel extreme forming',
+        ],
       }),
     );
   }
@@ -664,7 +710,18 @@ export function runScanner(
     const htfSnap = store.snapshot(st, htf, now, cycleId);
     const a = store.getAnalysis(st, tf);
     const htfA = store.getAnalysis(st, htf);
-    const ctx: ScanContext = { st, tf, htf, now, snap, htfSnap, a, htfA };
+    const ctx: ScanContext = {
+      st,
+      tf,
+      htf,
+      now,
+      snap,
+      htfSnap,
+      a,
+      htfA,
+      P: getScanParams(slug),
+      liveEma: (period: number) => store.liveEma(st, tf, period),
+    };
     try {
       signals.push(...IMPL[slug](ctx));
     } catch {

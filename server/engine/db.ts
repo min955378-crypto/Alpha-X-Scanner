@@ -11,7 +11,9 @@ import {
   type LicenseKeyRow,
   type PlanTier,
   type RiskWatchItem,
+  type RiskCategory,
   type Role,
+  type CustomSignal,
   type ScannerConfigRow,
   type ScannerSlug,
   type SystemConfig,
@@ -86,12 +88,31 @@ export interface LicenseRecord {
   createdAt: number;
 }
 
+/* --------------------------- backup snapshot ---------------------------- */
+
+/** Bump only when the shape changes incompatibly. */
+export const SNAPSHOT_VERSION = 1;
+
+/** MODULE 9  Everything a restore needs. `secret` is deliberately excluded. */
+export interface DbSnapshot {
+  version: number;
+  exportedAt: number;
+  users: UserRecord[];
+  licenses: LicenseRecord[];
+  scannerConfigs: ScannerConfigRow[];
+  systemConfig: SystemConfig;
+  riskItems: RiskWatchItem[];
+  customSignals: CustomSignal[];
+  auditLogs: AuditLogRow[];
+}
+
 interface DbShape {
   users: UserRecord[];
   licenses: LicenseRecord[];
   scannerConfigs: ScannerConfigRow[];
   systemConfig: SystemConfig;
   riskItems: RiskWatchItem[];
+  customSignals: CustomSignal[];
   auditLogs: AuditLogRow[];
   secret: string;
   /** §2.2  Set once the stored snapshot has been promoted to full access. */
@@ -217,7 +238,8 @@ function seed(): DbShape {
     status: 'ACTIVE',
     plan: 'ULTRA_PRO',
     durationDays: 3650,
-    maxDevices: 3,
+    /* §1.2  The owner's key must never trip LICENSE_IN_USE. */
+    maxDevices: 99,
     activeDeviceHashes: [],
     ...grantsFrom(ALL_ENTITLEMENTS),
     assignedUserId: null,
@@ -231,8 +253,10 @@ function seed(): DbShape {
     keyString: 'APS-TRIAL-AA17-K4M2',
     status: 'ACTIVE',
     plan: 'LITE',
-    durationDays: 7,
-    maxDevices: 1,
+    /* §1.2  90d / 25 devices so testing demo across browsers and phones
+       never triggers LICENSE_IN_USE. */
+    durationDays: 90,
+    maxDevices: 25,
     activeDeviceHashes: [],
     ...grantsFrom(LITE_ENTITLEMENTS),
     assignedUserId: null,
@@ -295,6 +319,7 @@ function seed(): DbShape {
     scannerConfigs: defaultScannerConfigs(),
     systemConfig: { ...DEFAULT_SYSTEM_CONFIG },
     riskItems: [],
+    customSignals: [],
     auditLogs: [],
     secret: randomBytes(32).toString('hex'),
   };
@@ -352,6 +377,7 @@ class Database {
     this.scannerConfigs = new Map(data.scannerConfigs.map((c) => [c.slug, c]));
     this.systemConfig = { ...DEFAULT_SYSTEM_CONFIG, ...data.systemConfig };
     this.riskItems = new Map((data.riskItems ?? []).map((r) => [r.id, r]));
+    this.customSignals = new Map((data.customSignals ?? []).map((c) => [c.id, c]));
     this.auditLogs = data.auditLogs ?? [];
     this.secret = data.secret || randomBytes(32).toString('hex');
     this.unlockedAllAt = data.unlockedAllAt ?? null;
@@ -362,6 +388,7 @@ class Database {
        persist so the migration is durable. */
     this.migrateUnlockAll();
     this.migrateSystemConfig();
+    this.migrateSeedKeyLimits();
     this.persist();
   }
 
@@ -404,6 +431,37 @@ class Database {
       });
     }
     this.unlockedAllAt = Date.now();
+  }
+
+  /**
+   * §1.2  Raise the device/duration limits on the two seeded keys.
+   *
+   * A fresh install picks these up from `seed()`, but any existing `.data`
+   * snapshot still carries the old 7d / 1-device trial and the 3-device admin
+   * key. Without this, upgrading would leave `demo` throwing LICENSE_IN_USE
+   * the moment you opened a second browser — exactly the bug §1.2 exists to
+   * remove. Idempotent: only writes if a value is still below the new floor.
+   */
+  private migrateSeedKeyLimits(): void {
+    const floor: Array<{ key: string; maxDevices: number; durationDays: number }> = [
+      { key: 'APS-9F4A-22C1-88E0', maxDevices: 99, durationDays: 3650 },
+      { key: 'APS-TRIAL-AA17-K4M2', maxDevices: 25, durationDays: 90 },
+    ];
+
+    for (const spec of floor) {
+      const lic = this.licenseByKey(spec.key);
+      if (!lic) continue;
+      let touched = false;
+      if (lic.maxDevices < spec.maxDevices) {
+        lic.maxDevices = spec.maxDevices;
+        touched = true;
+      }
+      if (lic.durationDays < spec.durationDays) {
+        lic.durationDays = spec.durationDays;
+        touched = true;
+      }
+      if (touched) this.audit('system', 'MIGRATE_KEY_LIMITS', lic.id);
+    }
   }
 
   /** §1.1  Drop fields retired by the legacy brand purge from stored config. */
@@ -454,6 +512,7 @@ class Database {
         scannerConfigs: [...this.scannerConfigs.values()],
         systemConfig: this.systemConfig,
         riskItems: [...this.riskItems.values()],
+        customSignals: [...this.customSignals.values()],
         auditLogs: this.auditLogs.slice(0, 500),
         secret: this.secret,
         unlockedAllAt: this.unlockedAllAt,
@@ -533,14 +592,19 @@ class Database {
     return undefined;
   }
 
-  createLicense(input: { plan: PlanTier; durationDays: number; grants: Entitlements }): LicenseRecord {
+  createLicense(input: {
+    plan: PlanTier;
+    durationDays: number;
+    grants: Entitlements;
+    maxDevices?: number;
+  }): LicenseRecord {
     const l: LicenseRecord = {
       id: randomUUID(),
       keyString: generateLicenseKey(),
       status: 'ACTIVE',
       plan: input.plan,
       durationDays: input.durationDays,
-      maxDevices: input.plan === 'ULTRA_PRO' ? 3 : 1,
+      maxDevices: input.maxDevices ?? (input.plan === 'ULTRA_PRO' ? 3 : 1),
       activeDeviceHashes: [],
       ...grantsFrom(input.grants),
       assignedUserId: null,
@@ -565,6 +629,298 @@ class Database {
     this.auditLogs.unshift({ id: randomUUID(), adminUsername, action, targetId, createdAt: Date.now() });
     this.auditLogs = this.auditLogs.slice(0, 500);
     this.persist();
+  }
+
+  /* --------------------- license lifecycle (MODULES 3 & 4) --------------- */
+
+  /**
+   * MODULE 3/4  Clear `activeDeviceHashes` so a customer who hit
+   * LICENSE_IN_USE after changing phone or browser can sign straight back in.
+   */
+  resetLicenseDevices(licenseId: string): LicenseRecord | null {
+    const lic = this.licenses.get(licenseId);
+    if (!lic) return null;
+    lic.activeDeviceHashes = [];
+    this.persist();
+    return lic;
+  }
+
+  /**
+   * MODULE 3  Add days to `expiresAt`, measured from *now* when the key has
+   * already lapsed — extending an expired key by 30d must give 30 usable days,
+   * not 30 days from a timestamp in the past. Reactivates and starts the
+   * clock on a key that was never activated or had expired.
+   */
+  extendLicense(licenseId: string, days: number): LicenseRecord | null {
+    if (!Number.isFinite(days) || days <= 0) return null;
+    const lic = this.licenses.get(licenseId);
+    if (!lic) return null;
+
+    const now = Date.now();
+    const base = lic.expiresAt !== null && lic.expiresAt > now ? lic.expiresAt : now;
+    lic.expiresAt = base + Math.round(days * 86_400_000);
+    if (lic.activatedAt === null) lic.activatedAt = now;
+    if (lic.status === 'EXPIRED') lic.status = 'ACTIVE';
+    lic.durationDays = Math.max(lic.durationDays, Math.round((lic.expiresAt - (lic.activatedAt ?? now)) / 86_400_000));
+    this.persist();
+    return lic;
+  }
+
+  /** MODULE 3  Inline max-device change (1 / 2 / 5 / 99). */
+  setLicenseMaxDevices(licenseId: string, maxDevices: number): LicenseRecord | null {
+    const lic = this.licenses.get(licenseId);
+    if (!lic) return null;
+    const next = Math.max(1, Math.min(99, Math.round(maxDevices)));
+    /* Truncate any already-registered devices down to the new ceiling so the
+       row never reports more devices than are allowed. */
+    if (lic.activeDeviceHashes.length > next) lic.activeDeviceHashes = lic.activeDeviceHashes.slice(0, next);
+    lic.maxDevices = next;
+    this.persist();
+    return lic;
+  }
+
+  /** MODULE 3  ACTIVE <-> REVOKED. Revoking drops live sessions immediately. */
+  setLicenseStatus(licenseId: string, status: 'ACTIVE' | 'REVOKED'): LicenseRecord | null {
+    const lic = this.licenses.get(licenseId);
+    if (!lic) return null;
+    lic.status = status;
+    if (status === 'REVOKED') lic.activeDeviceHashes = [];
+    this.persist();
+    return lic;
+  }
+
+  /**
+   * MODULE 3  Delete a key. Refuses anything that is currently assigned AND
+   * active — deleting those would lock a paying customer out with no audit
+   * trail of who did it.
+   */
+  deleteLicense(licenseId: string): { ok: true } | { ok: false; error: string } {
+    const lic = this.licenses.get(licenseId);
+    if (!lic) return { ok: false, error: 'NOT_FOUND' };
+    if (lic.assignedUserId && lic.status === 'ACTIVE') {
+      return { ok: false, error: 'ASSIGNED_AND_ACTIVE' };
+    }
+
+    /* Unbind from the user so their record never points at a dead key. */
+    if (lic.assignedUserId) {
+      const u = this.userById(lic.assignedUserId);
+      if (u && u.licenseKeyId === lic.id) u.licenseKeyId = null;
+    }
+    this.licenses.delete(licenseId);
+    this.persist();
+    return { ok: true };
+  }
+
+  /** MODULE 3/4  Bind (or swap) a key onto a user, syncing entitlements. */
+  bindLicense(licenseId: string, userId: string): { ok: true } | { ok: false; error: string } {
+    const lic = this.licenses.get(licenseId);
+    const user = this.userById(userId);
+    if (!lic || !user) return { ok: false, error: 'NOT_FOUND' };
+
+    /* Release whatever the user was holding, and whoever held this key. */
+    const prev = user.licenseKeyId ? this.licenses.get(user.licenseKeyId) : undefined;
+    if (prev && prev.id !== lic.id) prev.assignedUserId = null;
+    if (lic.assignedUserId && lic.assignedUserId !== user.id) {
+      const other = this.userById(lic.assignedUserId);
+      if (other && other.licenseKeyId === lic.id) other.licenseKeyId = null;
+    }
+
+    lic.assignedUserId = user.id;
+    user.licenseKeyId = lic.id;
+    user.canAccessV1Scaling = lic.grantV1Scaling;
+    user.canAccessOrderBlock = lic.grantOrderBlock;
+    user.canAccessEmaCrossover = lic.grantEmaCrossover;
+    user.canAccessHiddenBullish = lic.grantHiddenBullish;
+    user.canAccessAlphaSniper = lic.grantAlphaSniper;
+    user.plan = lic.plan;
+    this.persist();
+    return { ok: true };
+  }
+
+  /**
+   * MODULE 2  Atomic onboarding: create user -> mint key -> bind -> activate.
+   *
+   * Deliberately one call so a failure mid-way cannot leave an account with no
+   * key (or a key with no owner). The whole thing rolls back on any error.
+   */
+  onboardCustomer(input: {
+    username: string;
+    password: string;
+    whatsappNumber?: string | null;
+    durationDays: number;
+    maxDevices: number;
+    grants: Entitlements;
+  }): { ok: true; user: UserRecord; license: LicenseRecord } | { ok: false; error: string } {
+    const username = input.username.trim();
+    if (!username || !input.password) return { ok: false, error: 'MISSING_FIELDS' };
+    if (this.userByUsername(username)) return { ok: false, error: 'USERNAME_TAKEN' };
+
+    const before = {
+      users: new Map(this.users),
+      licenses: new Map(this.licenses),
+      auditLen: this.auditLogs.length,
+    };
+
+    try {
+      const user = this.createUser({
+        username,
+        password: input.password,
+        whatsappNumber: input.whatsappNumber ?? null,
+      });
+      const license = this.createLicense({
+        plan: 'ULTRA_PRO',
+        durationDays: input.durationDays,
+        grants: input.grants,
+        maxDevices: input.maxDevices,
+      });
+
+      const bound = this.bindLicense(license.id, user.id);
+      if (!bound.ok) throw new Error(bound.error);
+
+      /* Activate the countdown now — the customer is paying from today. */
+      const now = Date.now();
+      license.activatedAt = now;
+      license.expiresAt = now + Math.round(input.durationDays * 86_400_000);
+      this.persist();
+
+      return { ok: true, user, license };
+    } catch {
+      this.users = before.users;
+      this.licenses = before.licenses;
+      this.auditLogs = this.auditLogs.slice(0, before.auditLen);
+      this.persist();
+      return { ok: false, error: 'ONBOARD_FAILED' };
+    }
+  }
+
+  /* --------------------- custom VIP signals (MODULE 6) ------------------- */
+
+  customSignals = new Map<string, CustomSignal>();
+
+  publishCustomSignal(input: Omit<CustomSignal, 'id' | 'createdAt' | 'validUntil'>, ttlMs: number | null = null): CustomSignal {
+    const sig: CustomSignal = {
+      ...input,
+      id: randomUUID(),
+      createdAt: Date.now(),
+      validUntil: ttlMs === null ? null : Date.now() + ttlMs,
+    };
+    this.customSignals.set(sig.id, sig);
+    this.persist();
+    return sig;
+  }
+
+  deleteCustomSignal(id: string): boolean {
+    const gone = this.customSignals.delete(id);
+    if (gone) this.persist();
+    return gone;
+  }
+
+  listCustomSignals(): CustomSignal[] {
+    const now = Date.now();
+    return [...this.customSignals.values()]
+      .filter((s) => s.validUntil === null || s.validUntil > now)
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  /* ---------------------- risk watch CMS (MODULE 7) ---------------------- */
+
+  deleteRiskItem(id: string): boolean {
+    const gone = this.riskItems.delete(id);
+    if (gone) this.persist();
+    return gone;
+  }
+
+  setRiskItemPinned(id: string, isPinned: boolean): RiskWatchItem | null {
+    const item = this.riskItems.get(id);
+    if (!item) return null;
+    item.isPinned = isPinned;
+    this.persist();
+    return item;
+  }
+
+  addRiskItem(input: Omit<RiskWatchItem, 'id'>): RiskWatchItem {
+    const item: RiskWatchItem = { ...input, id: randomUUID() };
+    this.riskItems.set(item.id, item);
+    this.persist();
+    return item;
+  }
+
+  /* ------------------------ backup & restore (MODULE 9) ------------------ */
+
+  /** MODULE 9  Full state export — everything needed to rebuild from scratch. */
+  exportSnapshot(): DbSnapshot {
+    return {
+      version: SNAPSHOT_VERSION,
+      exportedAt: Date.now(),
+      users: [...this.users.values()],
+      licenses: [...this.licenses.values()],
+      scannerConfigs: [...this.scannerConfigs.values()],
+      systemConfig: this.systemConfig,
+      riskItems: [...this.riskItems.values()],
+      customSignals: [...this.customSignals.values()],
+      auditLogs: this.auditLogs,
+    };
+  }
+
+  /**
+   * MODULE 9  NON-DESTRUCTIVE restore.
+   *
+   * Every collection is merged by id, so a backup taken from a different
+   * environment adds missing records without deleting anything the running
+   * install currently holds. `secret` is never imported — adopting a foreign
+   * signing secret would invalidate every live session token.
+   */
+  importSnapshot(snap: unknown): { ok: true; counts: Record<string, number> } | { ok: false; error: string } {
+    if (!snap || typeof snap !== 'object') return { ok: false, error: 'BAD_PAYLOAD' };
+    const s = snap as Partial<DbSnapshot>;
+    if (!Array.isArray(s.users) && !Array.isArray(s.licenses) && !s.systemConfig) {
+      return { ok: false, error: 'BAD_PAYLOAD' };
+    }
+
+    const counts: Record<string, number> = { users: 0, licenses: 0, scannerConfigs: 0, riskItems: 0, customSignals: 0 };
+
+    for (const u of s.users ?? []) {
+      if (!u?.id || !u.username) continue;
+      if (!this.users.has(u.id)) {
+        this.users.set(u.id, u);
+        counts.users += 1;
+      }
+    }
+    for (const l of s.licenses ?? []) {
+      if (!l?.id || !l.keyString) continue;
+      if (!this.licenses.has(l.id)) {
+        this.licenses.set(l.id, l);
+        counts.licenses += 1;
+      }
+    }
+    for (const c of s.scannerConfigs ?? []) {
+      if (!c?.slug) continue;
+      if (!this.scannerConfigs.has(c.slug)) {
+        this.scannerConfigs.set(c.slug, c);
+        counts.scannerConfigs += 1;
+      }
+    }
+    for (const r of s.riskItems ?? []) {
+      if (!r?.id) continue;
+      if (!this.riskItems.has(r.id)) {
+        this.riskItems.set(r.id, r);
+        counts.riskItems += 1;
+      }
+    }
+    for (const sig of s.customSignals ?? []) {
+      if (!sig?.id) continue;
+      if (!this.customSignals.has(sig.id)) {
+        this.customSignals.set(sig.id, sig);
+        counts.customSignals += 1;
+      }
+    }
+    if (s.systemConfig && typeof s.systemConfig === 'object') {
+      this.systemConfig = { ...this.systemConfig, ...s.systemConfig };
+    }
+
+    this.assertSchemaInvariants();
+    this.persist();
+    return { ok: true, counts };
   }
 
   /* ----------------------------- risk watch ----------------------------- */

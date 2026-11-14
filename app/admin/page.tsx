@@ -7,6 +7,13 @@ import { AppShell } from '@/components/shell/AppShell';
 import { AdminPortal } from '@/components/admin/AdminPortal';
 import { useAuth } from '@/components/providers/AuthProvider';
 
+/**
+ * §1.1  STEALTH ADMIN ROUTE.
+ *
+ * A non-admin must never see a single admin pixel. The guard renders an empty
+ * canvas (not a spinner, not a redirect message) while the session resolves,
+ * so there is zero admin UI flash before `router.replace('/dashboard')`.
+ */
 export default function AdminPage() {
   const { user, loading } = useAuth();
   const router = useRouter();

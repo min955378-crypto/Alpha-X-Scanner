@@ -83,19 +83,24 @@ export function htfAlignment(
 }
 
 /** §7.2 Alpha Sniper — zero-division-safe 500-candle win-rate filter. */
-export function alphaSniperWrGate(wr500: number | null, closedTrades500: number): {
+export function alphaSniperWrGate(
+  wr500: number | null,
+  closedTrades500: number,
+  minWinRate = 55,
+  minClosedTrades = 5,
+): {
   passes: boolean;
   adjustment: number;
   label: string;
 } {
-  if (closedTrades500 >= 5 && wr500 !== null) {
+  if (closedTrades500 >= minClosedTrades && wr500 !== null) {
     return {
-      passes: wr500 >= 55,
+      passes: wr500 >= minWinRate,
       adjustment: 0,
       label: `WIN RATE: ${wr500.toFixed(1)}%`,
     };
   }
-  // Fewer than 5 closed trades: never divide by zero (§7.2).
+  // Fewer than the minimum closed trades: never divide by zero (§7.2).
   return {
     passes: true,
     adjustment: -10,

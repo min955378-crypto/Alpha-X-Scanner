@@ -430,6 +430,31 @@ export type ClientMessage =
 /* RISK WATCH (spec §8)                                                       */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * MODULE 6  Manual VIP signal injected by the Admin.
+ * Carries its own payload so it can be re-broadcast on reconnect without
+ * depending on the scanner engine having produced it.
+ */
+export interface CustomSignal {
+  id: string;
+  scannerSlug: ScannerSlug;
+  symbol: string;
+  baseAsset: string;
+  timeframe: Timeframe;
+  direction: SignalDirection;
+  entryPrice: number;
+  invalidationPrice: number;
+  tp1Price: number;
+  tp2Price: number | null;
+  score: number;
+  reasons: string[];
+  note: string | null;
+  createdAt: number;
+  /** Admin signals never auto-expire — they stay until explicitly deleted. */
+  validUntil: number | null;
+  createdBy: string;
+}
+
 export type RiskCategory = 'MONITORING_TAG' | 'DELISTING_NOTICE' | 'SPOT_NEWS';
 
 export interface RiskWatchItem {
@@ -524,6 +549,8 @@ export interface LicenseKeyRow {
   grants: Entitlements;
   assignedUserId: string | null;
   assignedUsername: string | null;
+  /** MODULE 3  How many of `maxDevices` are currently registered. */
+  devicesUsed?: number;
   activatedAt: number | null;
   expiresAt: number | null;
   createdAt: number;
@@ -557,6 +584,10 @@ export interface SystemHealth {
   dataMode: DataMode;
   /** §4.3  Which upstream actually served the last successful call. */
   provider: 'binance' | 'bybit' | 'coincap' | 'NONE';
+  /** MODULE 1  Wall-clock ms of the last all-scanner sweep. */
+  lastScanDurationMs: number | null;
+  /** MODULE 1  Market socket round-trip latency in ms. */
+  wsLatencyMs: number | null;
   uptimeSec: number;
   scanCycle: number;
   heapUsedMb: number;

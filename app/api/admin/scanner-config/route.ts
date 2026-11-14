@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 
 import { TIMEFRAMES, type ScannerSlug, type Timeframe } from '@/lib/types';
 import { getDb } from '@/server/engine/db';
+import { getEngine } from '@/server/engine';
+import { invalidateScanParams } from '@/server/engine/scanparams';
 import { isGuardError, requireAdmin } from '../_guard';
 
 export const runtime = 'nodejs';
@@ -38,5 +40,12 @@ export async function POST(req: Request) {
   db.persist();
   db.audit(admin.username, 'SCANNER_CONFIG_UPDATE', body.slug);
 
-  return NextResponse.json({ ok: true, config: cfg });
+  /* MODULE 5  Hot-reload: drop the parameter memo, rebuild the warm-up series
+     that structural parameters (EMA periods, RSI length, swing-bar bounds)
+     bake into, then rescan immediately so the owner sees the effect at once
+     instead of waiting for the next 60s cycle. */
+  invalidateScanParams();
+  const rewarmed = getEngine().applyScannerConfig();
+
+  return NextResponse.json({ ok: true, config: cfg, rewarmed });
 }

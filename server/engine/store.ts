@@ -1,3 +1,4 @@
+import { getScanParams, requiredEmaPeriods } from './scanparams';
 import {
   Candle,
   atrWilder,
@@ -47,7 +48,15 @@ const BAR_MS: Record<Timeframe, number> = {
   '1D': 86_400_000,
 };
 
-const EMA_PERIODS = [9, 13, 21, 34, 50] as const;
+/**
+ * MODULE 5  The EMA periods the store maintains. The factory set is always
+ * present (the heatmap and Coin Finder read 9/13/21/34/50); the admin's tuned
+ * fastEma/midEma/slowEma/fastTrendEma/slowTrendEma are added on top.
+ */
+function emaPeriods(): number[] {
+  return requiredEmaPeriods();
+}
+const EMA_PERIODS_FALLBACK = [9, 13, 21, 34, 50];
 const CLOSED_VOL_WINDOW = 20;
 
 /* -------------------------------------------------------------------------- */
@@ -266,6 +275,28 @@ export class MarketStore {
     this.scores = map;
   }
 
+  /**
+   * MODULE 5  Live (intrabar) EMA for an arbitrary period.
+   *
+   * The snapshot object exposes only the factory 9/21/50 fields, but the Admin
+   * Math Tuner lets the owner redefine the fast/mid/slow periods. Scanners call
+   * this so a tuned period is honoured without widening the wire format.
+   */
+  liveEma(st: SymbolState, tf: Timeframe, period: number): number {
+    const tfs = st.tf[tf];
+    if (!tfs) return 0;
+    const p = Math.max(2, Math.round(period));
+    const forming = tfs.candles[tfs.candles.length - 1];
+    if (!forming) return tfs.ema[p] ?? 0;
+    /* Warm the series on first use for a period that predates the last save. */
+    if (tfs.ema[p] === undefined) {
+      const closes = tfs.candles.slice(0, -1).map((c) => c.c);
+      const series = emaSeries(closes, p);
+      tfs.ema[p] = series[series.length - 1] ?? forming.c;
+    }
+    return emaNext(tfs.ema[p], forming.c, p);
+  }
+
   /** Mark the 500-candle backfill complete for a symbol (Phase B). */
   markBackfilled(symbol: string): void {
     const st = this.symbols.get(symbol);
@@ -280,13 +311,44 @@ export class MarketStore {
     }
   }
 
+  /**
+   * MODULE 5  Hot-reload after an admin saves scanner parameters.
+   *
+   * Structural parameters (EMA periods, RSI length, Alpha Sniper smoothing,
+   * swing-bar bounds, zone-span limits) are baked into the warm-up series, so
+   * they only take effect once those series are rebuilt from the retained
+   * candle history. Threshold parameters need no rebuild — they are read fresh
+   * every cycle — but invalidating everything guarantees a single, consistent
+   * recomputation rather than a half-old / half-new engine state.
+   */
+  rewarm(): number {
+    let rewarmed = 0;
+    for (const st of this.symbols.values()) {
+      for (const tf of Object.keys(st.tf) as Timeframe[]) {
+        const tfs = st.tf[tf];
+        tfs.analysisDirty = true;
+        tfs.analysis = null;
+        tfs.cycleStamp = -1;
+        tfs.cycleSnap = null;
+        tfs.rsiLastCycle = null;
+        try {
+          st.tf[tf] = this.buildTfState(tfs.candles);
+          rewarmed += 1;
+        } catch {
+          /* Keep the previous state — a bad config must never wipe the store. */
+        }
+      }
+    }
+    return rewarmed;
+  }
+
   private buildTfState(candles: Candle[]): TfState {
     const closed = candles.slice(0, -1);
     const closes = closed.map((c) => c.c);
-    const wilder = wilderRsiSeed(closes, 14);
+    const wilder = wilderRsiSeed(closes, Math.round(getScanParams('alpha-sniper').rsiLength));
 
     const ema: Record<number, number> = {};
-    for (const period of EMA_PERIODS) {
+    for (const period of emaPeriods()) {
       const series = emaSeries(closes, period);
       ema[period] = series[series.length - 1] ?? closes[closes.length - 1] ?? 0;
     }
@@ -296,7 +358,7 @@ export class MarketStore {
     // Seed Alpha Sniper from the real EMA(RSI,3) series. Seeding it with the
     // raw RSI instead would make the first crossover() tests fire on noise.
     const rsiSeries = rsiSeriesFromCloses(closes);
-    const alphaSeries = emaSeries(rsiSeries, 3);
+    const alphaSeries = emaSeries(rsiSeries, Math.round(getScanParams('alpha-sniper').emaSmooth));
 
     return {
       candles,
@@ -396,13 +458,13 @@ export class MarketStore {
         forming.x = true;
 
         // Advance Wilder's smoothing — ONLY on an official close (§2.3).
-        const advanced = wilderRsiAdvance(tfs.wilder, prevClose, tfs.lastClosedClose, 14);
+        const advanced = wilderRsiAdvance(tfs.wilder, prevClose, tfs.lastClosedClose, Math.round(getScanParams('alpha-sniper').rsiLength));
         tfs.wilder = advanced;
         tfs.rsiAtClose = advanced.rsi;
         tfs.lastClosedClose = prevClose;
 
-        for (const period of EMA_PERIODS) tfs.ema[period] = emaNext(tfs.ema[period], prevClose, period);
-        tfs.alphaSniperAtClose = emaNext(tfs.alphaSniperAtClose, advanced.rsi, 3);
+        for (const period of emaPeriods()) tfs.ema[period] = emaNext(tfs.ema[period], prevClose, period);
+        tfs.alphaSniperAtClose = emaNext(tfs.alphaSniperAtClose, advanced.rsi, Math.round(getScanParams('alpha-sniper').emaSmooth));
 
         tfs.closedVols.push(forming.v);
         if (tfs.closedVols.length > CLOSED_VOL_WINDOW) tfs.closedVols.shift();
@@ -462,7 +524,7 @@ export class MarketStore {
     const atr = atrWilder(tfs.candles, 14);
 
     const ema: Record<number, number> = {};
-    for (const period of EMA_PERIODS) {
+    for (const period of emaPeriods()) {
       const series = emaSeries(closes, period);
       ema[period] = series[series.length - 1] ?? tfs.ema[period];
     }
@@ -490,6 +552,11 @@ export class MarketStore {
 
   private findOrderBlock(candles: Candle[], atr: number): ObState | null {
     if (atr <= 0 || candles.length < 30) return null;
+    const obP = getScanParams('order-block');
+    const minWidth = obP.minAtrWidth * atr;
+    const maxWidth = obP.maxAtrWidth * atr;
+    const lookback = Math.round(obP.lookbackSwing);
+    const maxTouches = Math.round(obP.maxTouches);
     const start = Math.max(0, candles.length - 120);
 
     for (let k = candles.length - 5; k >= start; k -= 1) {
@@ -500,28 +567,28 @@ export class MarketStore {
 
       // Bullish demand: last bearish candle before a 3-bar impulse + BOS + FVG.
       if (kc.c < kc.o) {
-        const swingHigh = highestHigh(candles.slice(Math.max(0, k - 10), k + 1), 10);
+        const swingHigh = highestHigh(candles.slice(Math.max(0, k - lookback), k + 1), lookback);
         const impulseClose = i3.c;
         const fvg = candles[k + 2] && candles[k + 2].l > kc.h;
         if (impulseClose > swingHigh && fvg) {
           const width = kc.h - kc.l;
-          if (width >= 0.15 * atr && width <= 1.6 * atr) {
+          if (width >= minWidth && width <= maxWidth) {
             const touches = this.countTouches(candles, k + 4, kc.l, kc.h, 'DEMAND');
-            if (touches <= 1) return { type: 'DEMAND', lo: kc.l, hi: kc.h, touches, kIndex: k };
+            if (touches <= maxTouches) return { type: 'DEMAND', lo: kc.l, hi: kc.h, touches, kIndex: k };
           }
         }
       }
 
       // Bearish supply: last bullish candle before a 3-bar drop + BOS + FVG.
       if (kc.c > kc.o) {
-        const swingLow = lowestLow(candles.slice(Math.max(0, k - 10), k + 1), 10);
+        const swingLow = lowestLow(candles.slice(Math.max(0, k - lookback), k + 1), lookback);
         const impulseClose = i3.c;
         const fvg = candles[k + 2] && candles[k + 2].h < kc.l;
         if (impulseClose < swingLow && fvg) {
           const width = kc.h - kc.l;
-          if (width >= 0.15 * atr && width <= 1.6 * atr) {
+          if (width >= minWidth && width <= maxWidth) {
             const touches = this.countTouches(candles, k + 4, kc.l, kc.h, 'SUPPLY');
-            if (touches <= 1) return { type: 'SUPPLY', lo: kc.l, hi: kc.h, touches, kIndex: k };
+            if (touches <= maxTouches) return { type: 'SUPPLY', lo: kc.l, hi: kc.h, touches, kIndex: k };
           }
         }
       }
@@ -530,11 +597,12 @@ export class MarketStore {
   }
 
   private countTouches(candles: Candle[], from: number, lo: number, hi: number, type: 'DEMAND' | 'SUPPLY'): number {
+    const limit = Math.round(getScanParams('order-block').maxTouches);
     let n = 0;
     for (let i = from; i < candles.length; i += 1) {
       const c = candles[i];
       if (type === 'DEMAND' ? c.l <= hi : c.h >= lo) n += 1;
-      if (n > 1) return n;
+      if (n > limit) return n;
     }
     return n;
   }
@@ -542,6 +610,13 @@ export class MarketStore {
   /* -------------------------- Hidden Bullish (§7.2) ----------------------- */
 
   private findHiddenBull(candles: Candle[], rsiSeries: number[]): HiddenBull | null {
+    const hbP = getScanParams('hidden-bullish');
+    const minBars = Math.round(hbP.minSwingBars);
+    const maxBars = Math.round(hbP.maxSwingBars);
+    const bullLo = hbP.bullRsiMin;
+    const bullHi = hbP.bullRsiMax;
+    const bearLo = hbP.bearRsiMin;
+    const bearHi = hbP.bearRsiMax;
     const lows = pivotLows(candles, 4, 4);
     const highs = pivotHighs(candles, 4, 4);
     const n = candles.length;
@@ -551,11 +626,11 @@ export class MarketStore {
       const t2 = lows[i];
       const t1 = lows[i - 1];
       const gap = t2.index - t1.index;
-      if (gap < 5 || gap > 40) continue;
+      if (gap < minBars || gap > maxBars) continue;
       if (n - t2.index > 25) continue;
       const rsiT2 = rsiSeries[t2.index] ?? 50;
       const rsiT1 = rsiSeries[t1.index] ?? 50;
-      if (t2.price > t1.price && rsiT2 < rsiT1 && rsiT2 >= 30 && rsiT2 <= 40) {
+      if (t2.price > t1.price && rsiT2 < rsiT1 && rsiT2 >= bullLo && rsiT2 <= bullHi) {
         const mss = highestHigh(candles.slice(t1.index, t2.index + 1), t2.index - t1.index + 1);
         return { type: 'BULL', t1: t1.index, t2: t2.index, mss, rsiAtT2: rsiT2 };
       }
@@ -566,11 +641,11 @@ export class MarketStore {
       const t2 = highs[i];
       const t1 = highs[i - 1];
       const gap = t2.index - t1.index;
-      if (gap < 5 || gap > 40) continue;
+      if (gap < minBars || gap > maxBars) continue;
       if (n - t2.index > 25) continue;
       const rsiT2 = rsiSeries[t2.index] ?? 50;
       const rsiT1 = rsiSeries[t1.index] ?? 50;
-      if (t2.price < t1.price && rsiT2 > rsiT1 && rsiT2 >= 60 && rsiT2 <= 70) {
+      if (t2.price < t1.price && rsiT2 > rsiT1 && rsiT2 >= bearLo && rsiT2 <= bearHi) {
         const mss = lowestLow(candles.slice(t1.index, t2.index + 1), t2.index - t1.index + 1);
         return { type: 'BEAR', t1: t1.index, t2: t2.index, mss, rsiAtT2: rsiT2 };
       }
@@ -591,19 +666,22 @@ export class MarketStore {
     const forming = tfs.candles[tfs.candles.length - 1];
     const prevClose = tfs.lastClosedClose;
 
-    const rsi = wilderRsiIntrabar(tfs.wilder, forming.c, prevClose, 14);
+    const rsi = wilderRsiIntrabar(tfs.wilder, forming.c, prevClose, Math.round(getScanParams('alpha-sniper').rsiLength));
     const rsiPrev = tfs.rsiLastCycle ?? rsi;
     tfs.rsiLastCycle = rsi;
 
     const ema9 = emaNext(tfs.ema[9], forming.c, 9);
-    const ema13 = emaNext(tfs.ema[13], forming.c, 13);
+    const sniperP = getScanParams('alpha-sniper');
+    const sniperFast = Math.round(sniperP.fastTrendEma);
+    const sniperSlow = Math.round(sniperP.slowTrendEma);
+    const ema13 = emaNext(tfs.ema[sniperFast], forming.c, sniperFast);
     const ema21 = emaNext(tfs.ema[21], forming.c, 21);
-    const ema34 = emaNext(tfs.ema[34], forming.c, 34);
+    const ema34 = emaNext(tfs.ema[sniperSlow], forming.c, sniperSlow);
     const ema50 = emaNext(tfs.ema[50], forming.c, 50);
 
     const tr = Math.max(forming.h - forming.l, Math.abs(forming.h - prevClose), Math.abs(forming.l - prevClose));
     const atr = (tfs.atrAtClose * 13 + tr) / 14;
-    const alphaSniper = emaNext(tfs.alphaSniperAtClose, rsi, 3);
+    const alphaSniper = emaNext(tfs.alphaSniperAtClose, rsi, Math.round(getScanParams('alpha-sniper').emaSmooth));
 
     const elapsedSec = Math.max(0, (now - forming.t) / 1000);
     const rv = rvol(forming.v, tfs.closedVols, TF_SECONDS[tf], elapsedSec);
@@ -657,7 +735,10 @@ export class MarketStore {
       prevClose,
       obStatus,
       emaStatus,
-      wr500: st.backfilled500 && a.wr500.closed >= 5 ? (a.wr500.wins / a.wr500.closed) * 100 : null,
+      wr500:
+        st.backfilled500 && a.wr500.closed >= Math.round(getScanParams('alpha-sniper').minClosedTrades)
+          ? (a.wr500.wins / a.wr500.closed) * 100
+          : null,
       closedTrades500: a.wr500.closed,
       score: this.scores.get(`${st.entry.symbol}|${tf}`) ?? 0,
     };
