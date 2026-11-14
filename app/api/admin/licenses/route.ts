@@ -4,6 +4,7 @@ import type { Entitlements } from '@/lib/types';
 import { ALL_ENTITLEMENTS, getDb } from '@/server/engine/db';
 import { pushAccessUpdate } from '@/server/ws';
 import { isGuardError, requireAdmin } from '../_guard';
+import { flushAfter } from '../_flush';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,7 +17,7 @@ export const dynamic = 'force-dynamic';
  * user's entitlements could have changed so live sockets pick it up instantly
  * rather than at the next 60s cycle.
  */
-export async function POST(req: Request) {
+async function handlePost(req: Request) {
   const guard = requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
   const { admin } = guard;
@@ -123,4 +124,11 @@ export async function POST(req: Request) {
     default:
       return NextResponse.json({ ok: false, error: 'BAD_ACTION' }, { status: 400 });
   }
+}
+
+
+/* §3  Durability wrappers — see ../_flush.ts. */
+
+export async function POST(req: Request) {
+  return flushAfter(handlePost(req));
 }
