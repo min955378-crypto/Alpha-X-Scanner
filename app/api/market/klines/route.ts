@@ -68,6 +68,26 @@ export async function GET(req: Request) {
     });
   }
 
+  /*
+   * §6.2  Zero NO_DATA guarantee, last tier.
+   *
+   * No history and no reachable upstream. Rather than a 404 and an empty
+   * canvas, reconstruct a deterministic series anchored to the coin's live
+   * price. The `source` field is carried through every branch so the UI can
+   * label synthetic data honestly instead of passing it off as real.
+   */
+  const synthetic = engine.store.synthesizeCandles(symbol, tf, limit);
+  if (synthetic && synthetic.length) {
+    return NextResponse.json({
+      ok: true,
+      symbol,
+      tf,
+      candles: synthetic,
+      source: 'synthetic',
+      dataMode: engine.dataMode,
+    });
+  }
+
   return NextResponse.json(
     { ok: false, error: 'NO_DATA', symbol, tf, dataMode: engine.dataMode },
     { status: 404 },

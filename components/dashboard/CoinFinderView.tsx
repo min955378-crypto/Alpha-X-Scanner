@@ -23,6 +23,8 @@ type FieldKey =
   | 'ema21v50'
   | 'priceVsEma21'
   | 'atrPct'
+  | 'bullObDist'
+  | 'bearObDist'
   | 'rvol';
 type Operator = '>' | '<' | '≥' | '≤' | 'between';
 
@@ -34,6 +36,8 @@ const FIELDS: Array<{ key: FieldKey; label: string; unit?: string }> = [
   { key: 'ema21v50', label: 'EMA21 vs EMA50', unit: '%' },
   { key: 'priceVsEma21', label: 'Price vs EMA21 Dist %', unit: '%' },
   { key: 'atrPct', label: 'ATR(14) %', unit: '%' },
+  { key: 'bullObDist', label: 'Bullish OB Distance %', unit: '%' },
+  { key: 'bearObDist', label: 'Bearish OB Distance %', unit: '%' },
   { key: 'rvol', label: 'RVOL(20)', unit: '×' },
 ];
 
@@ -530,6 +534,12 @@ function fieldValue(coin: CoinSnapshot, field: FieldKey): number {
       return coin.ema21 !== 0 ? ((coin.price - coin.ema21) / coin.ema21) * 100 : 0;
     case 'atrPct':
       return coin.atrPct;
+    /* §4.2  No zone present => NaN, so every operator rejects the coin. It
+       must not read as 0, which would mean "sitting inside the zone". */
+    case 'bullObDist':
+      return coin.bullObDistPct ?? Number.NaN;
+    case 'bearObDist':
+      return coin.bearObDistPct ?? Number.NaN;
     case 'rvol':
       return coin.rvol;
     default:

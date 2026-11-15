@@ -331,6 +331,14 @@ export interface CoinSnapshot {
   obStatus: ObStatus;
   emaStatus: EmaStatus;
 
+  /**
+   * §4.2  Distance from price to the nearest unmitigated zone, as a positive
+   * percentage (0 when price is inside it, null when no such zone exists).
+   * Powers the Coin Finder's two OB distance conditions.
+   */
+  bullObDistPct: number | null;
+  bearObDistPct: number | null;
+
   /** Alpha Sniper rolling 500-candle win rate (null => "WIN RATE: --"). */
   wr500: number | null;
   closedTrades500: number;
