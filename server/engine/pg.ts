@@ -65,23 +65,90 @@ export async function pgSelect<T>(table: string, query = 'select=*'): Promise<T[
   }
 }
 
+/** How many unknown-column retries `pgUpsert` will attempt. */
+const MAX_UPSERT_RETRIES = 4;
+
+/**
+ * §8.4  Pulls the offending column out of a PostgREST "unknown column" error.
+ *
+ * PostgREST answers with a body like:
+ *   {"code":"PGRST204","message":"Could not find the 'totpSecret' column of
+ *    'User' in the schema cache"}
+ *
+ * We return only the column name so the caller can drop that one key and
+ * retry — the rest of the row still persists.
+ */
+function unknownColumnFrom(body: string): string | null {
+  const quoted = /Could not find the '([^']+)' column/.exec(body);
+  if (quoted?.[1]) return quoted[1];
+  try {
+    const parsed = JSON.parse(body) as { code?: string; message?: string };
+    if (parsed.code !== 'PGRST204') return null;
+    return /'([^']+)'/.exec(parsed.message ?? '')?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function stripKey(rows: unknown[], key: string): unknown[] {
+  return rows.map((r) => {
+    if (!r || typeof r !== 'object' || Array.isArray(r)) return r;
+    const { [key]: _dropped, ...rest } = r as Record<string, unknown>;
+    return rest;
+  });
+}
+
 /**
  * Upserts `rows` into `table`, matching on `onConflict`.
+ *
  * Empty input is a no-op so we never send a pointless round trip.
+ *
+ * §8.4  Schema-tolerant: if PostgREST rejects the payload because a column has
+ * not been migrated yet (HTTP 400 / `PGRST204`), we drop just that column and
+ * retry. Without this, adding one field to a row type would silently stop *all*
+ * persistence for that table — every user write would fail, and nothing would
+ * look broken until the next cold start revealed the data was never saved.
  */
 export async function pgUpsert(table: string, rows: unknown[], onConflict: string): Promise<boolean> {
   if (!pgEnabled() || rows.length === 0) return false;
-  try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?on_conflict=${onConflict}`, {
-      method: 'POST',
-      headers: headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
-      body: JSON.stringify(rows),
-      cache: 'no-store',
-    });
-    return res.ok;
-  } catch {
-    return false;
+
+  let payload = rows;
+
+  for (let attempt = 0; attempt <= MAX_UPSERT_RETRIES; attempt += 1) {
+    let res: Response;
+    try {
+      res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?on_conflict=${onConflict}`, {
+        method: 'POST',
+        headers: headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
+        body: JSON.stringify(payload),
+        cache: 'no-store',
+      });
+    } catch {
+      return false;
+    }
+
+    if (res.ok) return true;
+
+    const body = await res.text().catch(() => '');
+    if (res.status !== 400) return false;
+
+    const column = unknownColumnFrom(body);
+    if (!column) return false;
+
+    /* Never strip the conflict target. An upsert with no `on_conflict` column
+       cannot match a row, so "succeeding" would mean the write silently did
+       nothing — and a missing primary key means the table is in a far worse
+       state than one unmigrated optional column, so failing loudly is right. */
+    if (column === onConflict) return false;
+
+    const next = stripKey(payload, column);
+    /* Nothing left to strip — the payload is empty or the column was absent,
+       so retrying would spin. */
+    if (JSON.stringify(next) === JSON.stringify(payload)) return false;
+    payload = next;
   }
+
+  return false;
 }
 
 /**

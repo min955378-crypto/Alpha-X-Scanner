@@ -18,7 +18,7 @@ export const dynamic = 'force-dynamic';
  * rather than at the next 60s cycle.
  */
 async function handlePost(req: Request) {
-  const guard = requireAdmin(req);
+  const guard = await requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
   const { admin } = guard;
 

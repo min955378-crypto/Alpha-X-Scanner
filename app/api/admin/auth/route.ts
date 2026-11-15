@@ -37,21 +37,32 @@ export async function POST(req: Request) {
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   if (!body) return NextResponse.json({ ok: false, error: 'BAD_JSON' }, { status: 400 });
 
+  /* §8.2  Every path here reads or writes admin state, so hydration must
+     finish first — including `login`, which is why this sits above it. */
+  await getDb().ensureHydrated();
+
   const action = String(body.action ?? '');
 
-  if (action === 'login') return login(body);
+  /* §8.3  `login` mints a TOTP secret on first use; flush it before the
+     function freezes. */
+  if (action === 'login') return flushAfter(login(body));
 
-  const guard = requireAdmin(req);
+  const guard = await requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
   const { admin } = guard;
   const db = getDb();
 
   switch (action) {
-    case 'setup': {
-      const setup = db.totpSetup(admin.id);
-      if (!setup) return NextResponse.json({ ok: false, error: 'NOT_FOUND' }, { status: 404 });
-      return NextResponse.json({ ok: true, ...setup });
-    }
+    /* §8.3  `setup` generates the secret on first call, so it is a mutation
+       and must be flushed like one. */
+    case 'setup':
+      return flushAfter(
+        Promise.resolve().then(() => {
+          const setup = db.totpSetup(admin.id);
+          if (!setup) return NextResponse.json({ ok: false, error: 'NOT_FOUND' }, { status: 404 });
+          return NextResponse.json({ ok: true, ...setup });
+        }),
+      );
 
     case 'enable': {
       const code = field(body, 'code').trim();
