@@ -17,7 +17,7 @@ const MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024;
  * guaranteed to be byte-identical).
  */
 export async function POST(req: Request) {
-  const guard = requireAdmin(req);
+  const guard = await requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
   const { admin } = guard;
 
@@ -53,7 +53,7 @@ export async function POST(req: Request) {
 
 /** Lets the portal show the real transport state instead of guessing. */
 export async function GET(req: Request) {
-  const guard = requireAdmin(req);
+  const guard = await requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
 
   return NextResponse.json({

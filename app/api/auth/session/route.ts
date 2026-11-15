@@ -10,6 +10,10 @@ export const dynamic = 'force-dynamic';
 
 /** GET /api/v1/auth/session — current user, entitlements and branding config. */
 export async function GET(req: Request) {
+  /* §8.2  A cold instance must not report the seed's branding or resolve a
+     session against seed users. */
+  await getDb().ensureHydrated();
+
   const user = sessionUserFromToken(parseCookies(req.headers.get('cookie'))[SESSION_COOKIE]);
   const db = getDb();
   const engine = getEngine();

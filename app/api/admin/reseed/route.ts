@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic';
  * symbol state is reused for any symbol that still exists.
  */
 async function handlePost(req: Request) {
-  const guard = requireAdmin(req);
+  const guard = await requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
   const { admin } = guard;
 

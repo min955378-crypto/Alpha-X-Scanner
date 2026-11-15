@@ -20,7 +20,7 @@ const MAX_IMPORT_BYTES = 25 * 1024 * 1024;
  *          older snapshot can never delete customers who signed up since.
  */
 export async function GET(req: Request) {
-  const guard = requireAdmin(req);
+  const guard = await requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
   const { admin } = guard;
 
@@ -40,7 +40,7 @@ export async function GET(req: Request) {
 }
 
 async function handlePost(req: Request) {
-  const guard = requireAdmin(req);
+  const guard = await requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
   const { admin } = guard;
 

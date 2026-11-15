@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 
 /** §10 module 4 — Coin universe & Monitoring Tag (⚠) overrides. */
 async function handlePost(req: Request) {
-  const guard = requireAdmin(req);
+  const guard = await requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
   const { admin } = guard;
 

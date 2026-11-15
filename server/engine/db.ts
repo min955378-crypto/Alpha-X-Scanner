@@ -665,6 +665,38 @@ class Database {
    * has rows, so a brand-new Postgres (or an unreachable one) leaves the file
    * store's seed untouched instead of wiping it.
    */
+  /**
+   * §8.2  Hydrate once per process, then hand back the cached promise.
+   *
+   * On a serverless host every cold start builds a fresh `Database` seeded with
+   * default users. If a request is served before hydration completes, that seed
+   * is what the caller sees — and `persist()` will then happily write it over
+   * the real rows in Postgres. That is how live users, passwords and 2FA
+   * secrets get clobbered by default data.
+   *
+   * Every auth and admin entry point therefore awaits this first. The promise
+   * is cached so concurrent requests share one round trip, and a failure is
+   * remembered as "resolved" so a broken Postgres degrades to the in-memory
+   * store rather than retrying on every single request.
+   */
+  private hydration: Promise<boolean> | null = null;
+
+  ensureHydrated(): Promise<boolean> {
+    if (!pgEnabled()) return Promise.resolve(false);
+    if (!this.hydration) {
+      this.hydration = this.hydrateFromPostgres().catch(() => false);
+    }
+    return this.hydration;
+  }
+
+  /**
+   * Test seam: forget the cached hydration so a suite can observe a genuine
+   * re-hydration. Production code must not call this.
+   */
+  resetHydration(): void {
+    this.hydration = null;
+  }
+
   async hydrateFromPostgres(): Promise<boolean> {
     if (!pgEnabled()) return false;
     try {

@@ -25,7 +25,7 @@ function levelFor(severity: BroadcastSeverity): BroadcastLevel {
  *   DELETE → clear the banner everywhere.
  */
 async function handlePost(req: Request) {
-  const guard = requireAdmin(req);
+  const guard = await requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
   const { admin } = guard;
 
@@ -68,7 +68,7 @@ async function handlePost(req: Request) {
 
 /** Clearing is a real state change: drop the row and notify live sockets. */
 async function handleDelete(req: Request) {
-  const guard = requireAdmin(req);
+  const guard = await requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
   const { admin } = guard;
 

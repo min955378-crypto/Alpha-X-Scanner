@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic';
  * pre-filled WhatsApp deep link, so Muhammad Ibrahim can deliver in one tap.
  */
 async function handlePost(req: Request) {
-  const guard = requireAdmin(req);
+  const guard = await requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
   const { admin } = guard;
 

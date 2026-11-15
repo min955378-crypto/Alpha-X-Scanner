@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { clearCookieHeader, cookieHeader, login, type LoginFailure } from '@/server/engine/auth';
+import { getDb } from '@/server/engine/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,6 +17,9 @@ const MESSAGES: Record<LoginFailure, string> = {
 
 /** §4.2  POST /api/v1/auth/login — the 3-field license gate. */
 export async function POST(req: Request) {
+  /* §8.2  Validate against real Postgres rows, not the cold-start seed. */
+  await getDb().ensureHydrated();
+
   const body = (await req.json().catch(() => ({}))) as {
     username?: string;
     password?: string;

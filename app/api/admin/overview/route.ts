@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 
 /** §10 module 1 — System overview + every other module's data in one payload. */
 export async function GET(req: Request) {
-  const guard = requireAdmin(req);
+  const guard = await requireAdmin(req);
   if (isGuardError(guard)) return guard.response;
 
   const db = getDb();
