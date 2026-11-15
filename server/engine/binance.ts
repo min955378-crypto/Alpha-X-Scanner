@@ -428,6 +428,65 @@ async function fetchCoincapFallback(): Promise<Map<string, Ticker24> | null> {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Funding rates                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * §1.2.2  Live USDT-M perpetual funding rates for every contract, in one call.
+ *
+ * Powers Column 11 of the Pro Table. Returns the rate in **percent** (the
+ * exchange reports a fraction: 0.0001 → +0.010%).
+ *
+ * Only symbols ending in `USDT` are kept. The USD-M index also lists contracts
+ * quoted in other currencies, and a stray `BTCUSDC` row would otherwise mark a
+ * spot pair as having a perpetual that does not match it.
+ */
+export async function fetchFundingRates(): Promise<Map<string, number> | null> {
+  /* Primary — Binance USD-M. */
+  try {
+    const arr = (await getJsonFrom('https://fapi.binance.com/fapi/v1/premiumIndex', 8000)) as
+      | Array<Record<string, string>>
+      | null;
+    if (Array.isArray(arr) && arr.length) {
+      const out = new Map<string, number>();
+      for (const r of arr) {
+        const sym = r?.symbol;
+        if (!sym || !sym.endsWith('USDT')) continue;
+        const rate = Number(r.lastFundingRate);
+        if (!Number.isFinite(rate)) continue;
+        out.set(sym, rate * 100);
+      }
+      if (out.size) return out;
+    }
+  } catch {
+    /* fall through to Bybit */
+  }
+
+  /* Fallback — Bybit linear perpetuals report `fundingRate` as a fraction. */
+  try {
+    const payload = (await getJsonFrom(
+      'https://api.bybit.com/v5/market/tickers?category=linear',
+      8000,
+    )) as { result?: { list?: Array<Record<string, string>> } } | null;
+    const rows = payload?.result?.list ?? [];
+    if (rows.length) {
+      const out = new Map<string, number>();
+      for (const r of rows) {
+        const sym = r?.symbol;
+        if (!sym || !sym.endsWith('USDT')) continue;
+        const rate = Number(r.fundingRate);
+        if (!Number.isFinite(rate)) continue;
+        out.set(sym, rate * 100);
+      }
+      if (out.size) return out;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Klines                                                                      */
 /* -------------------------------------------------------------------------- */
 

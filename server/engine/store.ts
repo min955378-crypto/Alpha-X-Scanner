@@ -39,6 +39,7 @@ import {
   tickCandle,
 } from './simulator';
 import type { UniverseEntry } from './universe';
+import type { Ticker24 } from './binance';
 
 const BAR_MS: Record<Timeframe, number> = {
   '15M': 900_000,
@@ -58,6 +59,20 @@ function emaPeriods(): number[] {
 }
 const EMA_PERIODS_FALLBACK = [9, 13, 21, 34, 50];
 const CLOSED_VOL_WINDOW = 20;
+
+/**
+ * §1.1  Bars generated for a cold-start placeholder.
+ *
+ * Sized so every indicator the frame publishes has a mathematically valid
+ * input — RSI(14) and ATR(14) need ~15, RVOL(20) needs 20 closed volumes, and
+ * the Order Block detector looks back 10 bars for a break of structure plus
+ * room for a fair-value gap. 60 leaves headroom for all of them while keeping
+ * the whole 600-coin baseline cheap enough to build inside one cold start.
+ *
+ * These bars are a placeholder, not a substitute: Phase A replaces them with
+ * real history as it arrives.
+ */
+const BASELINE_BARS = 60;
 
 /* -------------------------------------------------------------------------- */
 /* Analysis cache                                                             */
@@ -94,6 +109,9 @@ export interface TfAnalysis {
   pivotsHigh: Array<{ index: number; price: number }>;
   pivotsLow: Array<{ index: number; price: number }>;
   ob: ObState | null;
+  /** §4.2  Nearest unmitigated zone of each type, for the Coin Finder. */
+  obDemand: ObState | null;
+  obSupply: ObState | null;
   hb: HiddenBull | null;
   wr500: { wins: number; losses: number; closed: number };
   swingHigh20: number;
@@ -120,6 +138,17 @@ interface TfState {
   /** Cycle-id memo so every consumer in a 60s cycle sees one identical value. */
   cycleStamp: number;
   cycleSnap: CoinSnapshot | null;
+  /**
+   * §1.1  True while this state is a cold-start placeholder rather than real
+   * market history.
+   *
+   * A baseline is structurally complete — the frame can render it — but its
+   * candles are synthesised from the symbol's profile. It exists so a coin is
+   * never *absent* while its real klines are still in flight. `seedSymbol`
+   * checks this flag so a baseline never blocks the real backfill from
+   * replacing it.
+   */
+  baseline?: boolean;
 }
 
 export interface SymbolState {
@@ -138,6 +167,15 @@ export interface SymbolState {
   high24h: number;
   low24h: number;
   tf: Record<Timeframe, TfState>;
+  /**
+   * §1.2  True once the 24h statistics came from the real bulk ticker.
+   *
+   * Until then `recomputeQuote` derives them from candles, which is correct
+   * for simulated data. After a real ticker has landed, overwriting those
+   * numbers with values derived from 60 baseline bars would replace a real
+   * 24h change with an invented one, so only the intrabar high/low extend.
+   */
+  quoteFromTicker: boolean;
   /** True once the Phase B 500-candle backfill has run for this symbol. */
   backfilled500: boolean;
   rand: () => number;
@@ -184,6 +222,7 @@ export class MarketStore {
         high24h: 0,
         low24h: 0,
         tf: {} as Record<Timeframe, TfState>,
+        quoteFromTicker: false,
         /**
          * §2.2  Phase B status lives on the SYMBOL, not the timeframe: a
          * timeframe materialised lazily (user switches to 4H after the
@@ -218,10 +257,59 @@ export class MarketStore {
 
   /* ------------------------------ Seeding -------------------------------- */
 
+  /**
+   * §1.1  Materialise a placeholder state for one (symbol, timeframe).
+   *
+   * Before this existed, `buildFrame` skipped any symbol whose timeframe state
+   * was still `undefined`, so a cold start showed only the handful of coins
+   * that had finished seeding — which on a serverless host that freezes
+   * mid-backfill meant a terminal stuck at ~45 coins. Every enabled coin now
+   * has a valid state from the first millisecond and is never filtered out.
+   */
+  ensureBaseline(st: SymbolState, tf: Timeframe, now: number): TfState {
+    const existing = st.tf[tf];
+    if (existing) return existing;
+
+    /* Volatility scales with sqrt(barMs) so a 1D bar really is wider than a
+       1H bar — the same rule `seedSymbol` uses for its full series. */
+    const vs = Math.sqrt(BAR_MS[tf] / BAR_MS['1H']);
+    const candles = generateSeries(st.profile, BAR_MS[tf], BASELINE_BARS, now, 1, vs);
+    const tfs = this.buildTfState(candles);
+    tfs.baseline = true;
+    st.tf[tf] = tfs;
+
+    /* A symbol whose price is still 0 has never been quoted. Anchor it to the
+       baseline so the frame can render a price, 24h % and range immediately. */
+    if (!(st.price > 0)) {
+      st.price = candles[candles.length - 1].c;
+      st.pricePrevTick = st.price;
+      this.recomputeQuote(st);
+    }
+    return tfs;
+  }
+
+  /**
+   * §1.1  Give every enabled symbol a state for `tf`.
+   *
+   * Called from `buildFrame` so the guarantee is tied to the thing that needs
+   * it: whichever timeframe is being served is the one that gets materialised,
+   * which keeps the first request for an unused timeframe free.
+   */
+  ensureBaselines(tf: Timeframe, now: number): void {
+    for (const symbol of this.order) {
+      const st = this.symbols.get(symbol);
+      if (!st || !st.enabled) continue;
+      this.ensureBaseline(st, tf, now);
+    }
+  }
+
   /** Seed one symbol across all five timeframes (a single Phase A request). */
   seedSymbol(symbol: string, now: number): void {
     const st = this.symbols.get(symbol);
-    if (!st || st.tf['1H']) return;
+    if (!st) return;
+    /* Skip only a REAL seed. A cold-start placeholder must always be
+       upgradeable, or the coin would keep synthetic history forever. */
+    if (st.tf['1H'] && !st.tf['1H'].baseline) return;
     const p = st.profile;
 
     const h1 = generateSeries(p, BAR_MS['1H'], 520, now);
@@ -239,11 +327,15 @@ export class MarketStore {
     const h4 = generateSeries(p, BAR_MS['4H'], 260, now, 1, vs('4H'));
     const d1 = generateSeries(p, BAR_MS['1D'], 260, now, 1, vs('1D'));
 
-    st.tf['1H'] = this.buildTfState(h1);
-    st.tf['15M'] = this.buildTfState(m15);
-    st.tf['30M'] = this.buildTfState(m30);
-    st.tf['4H'] = this.buildTfState(h4);
-    st.tf['1D'] = this.buildTfState(d1);
+    /* §1.3  Real history always wins. A live kline warm-up runs concurrently
+       with this backfill, and whichever lands first must not be undone: a
+       timeframe holding real candles is left exactly as it is. Only a missing
+       or placeholder state is (re)built from the simulation. */
+    const put = (tf: Timeframe, series: Candle[]) => {
+      const cur = st.tf[tf];
+      if (cur && !cur.baseline) return;
+      st.tf[tf] = this.buildTfState(series);
+    };
 
     // Every timeframe must agree on the live price, so re-anchor the others
     // onto the 1H close (the series the tick loop advances).
@@ -259,9 +351,43 @@ export class MarketStore {
         c.c *= k;
       }
     }
-    st.price = livePrice;
-    st.pricePrevTick = livePrice;
-    this.recomputeQuote(st);
+
+    put('1H', h1);
+    put('15M', m15);
+    put('30M', m30);
+    put('4H', h4);
+    put('1D', d1);
+
+    /* Never overwrite a price the market already gave us — in LIVE mode the
+       bulk ticker sets this seconds after boot. */
+    if (!(st.price > 0)) {
+      st.price = livePrice;
+      st.pricePrevTick = livePrice;
+      this.recomputeQuote(st);
+    }
+  }
+
+  /**
+   * §1.3  Replace one timeframe with real exchange candles.
+   *
+   * Used by the parallel kline warm-up. The state it writes is marked real
+   * (`baseline` cleared), so the simulated backfill will skip that timeframe
+   * from then on — a late simulation can never undo a real fetch.
+   */
+  seedFromCandles(symbol: string, tf: Timeframe, candles: Candle[]): boolean {
+    if (!candles.length) return false;
+    const st = this.symbols.get(symbol);
+    if (!st) return false;
+
+    const tfs = this.buildTfState(candles);
+    st.tf[tf] = tfs;
+
+    if (!(st.price > 0)) {
+      st.price = candles[candles.length - 1].c;
+      st.pricePrevTick = st.price;
+      this.recomputeQuote(st);
+    }
+    return true;
   }
 
   /**
@@ -379,10 +505,32 @@ export class MarketStore {
 
   /* ------------------------------- Ticking ------------------------------- */
 
-  /** Advance the simulated market by `dtSec` seconds. */
-  tick(now: number, dtSec: number): void {
+  /**
+   * Advance the market by `dtSec` seconds.
+   *
+   * `live` is the LIVE-mode path. There the price is owned by the bulk ticker
+   * and the `!miniTicker@arr` socket, so this must NOT run the simulated
+   * random walk — doing so moved the price every second on top of the real
+   * quote, and `recomputeQuote` then replaced real 24h statistics with values
+   * derived from synthetic candles. In LIVE mode we only keep the forming
+   * candle in step with the price we were actually given.
+   */
+  tick(now: number, dtSec: number, live = false): void {
     for (const st of this.symbols.values()) {
       if (!st.tf['1H']) continue;
+
+      if (live) {
+        if (!(st.price > 0)) continue;
+        for (const tfs of Object.values(st.tf)) {
+          const forming = tfs.candles[tfs.candles.length - 1];
+          if (!forming) continue;
+          if (st.price > forming.h) forming.h = st.price;
+          if (st.price < forming.l) forming.l = st.price;
+          forming.c = st.price;
+        }
+        continue;
+      }
+
       const prev = st.price;
       const next = nextSimPrice(st.profile, prev, dtSec, st.rand, st.normal);
       st.pricePrevTick = prev;
@@ -399,6 +547,41 @@ export class MarketStore {
 
       this.recomputeQuote(st);
     }
+  }
+
+  /**
+   * §6.2  Deterministic synthetic candles anchored to the coin's live price.
+   *
+   * The last resort for the chart. If the engine has no history and the
+   * upstream is unreachable — a blocked region, an air-gapped demo, a sandbox
+   * — the chart must still draw a full series rather than an empty canvas.
+   *
+   * It is deterministic: the same symbol and timeframe always produce the same
+   * series, so the chart does not reshuffle itself on refresh. And it is
+   * anchored to the price we actually believe the coin trades at, so the
+   * candles sit on the real quote instead of around a fabricated one.
+   *
+   * This is a rendering fallback, never a data source: nothing here is written
+   * back into the store's working series.
+   */
+  synthesizeCandles(symbol: string, tf: Timeframe, count: number, now = Date.now()): Candle[] | null {
+    const st = this.symbols.get(symbol);
+    if (!st) return null;
+    const n = Math.max(2, Math.round(count));
+    const vs = Math.sqrt(BAR_MS[tf] / BAR_MS['1H']);
+    const series = generateSeries(st.profile, BAR_MS[tf], n, now, 1, vs);
+
+    const last = series[series.length - 1]?.c ?? 0;
+    if (st.price > 0 && Number.isFinite(last) && last > 0) {
+      const k = st.price / last;
+      for (const c of series) {
+        c.o *= k;
+        c.h *= k;
+        c.l *= k;
+        c.c *= k;
+      }
+    }
+    return series;
   }
 
   /**
@@ -441,6 +624,100 @@ export class MarketStore {
     }
 
     this.recomputeQuote(st);
+  }
+
+  /**
+   * §1.2  Apply one row of the bulk `GET /api/v3/ticker/24hr` payload.
+   *
+   * This is the single call that makes all 600+ coins real in one round trip:
+   * price, 24h change, quote volume, 24h high/low and a live bid-ask spread.
+   * Without it those fields were whatever the simulator happened to generate,
+   * even in LIVE mode.
+   *
+   * The 24h fields are written directly rather than re-derived from candles,
+   * because at cold start the candles are still the 60-bar baseline — deriving
+   * a 24h change from synthetic history would overwrite a real number with an
+   * invented one.
+   */
+  applyTicker(t: Ticker24): boolean {
+    const st = this.symbols.get(t.symbol);
+    if (!st) return false;
+    if (!Number.isFinite(t.lastPrice) || t.lastPrice <= 0) return false;
+
+    st.pricePrevTick = st.price > 0 ? st.price : t.lastPrice;
+    st.price = t.lastPrice;
+
+    if (Number.isFinite(t.quoteVolume) && t.quoteVolume >= 0) st.quoteVol24h = t.quoteVolume;
+    if (Number.isFinite(t.highPrice) && t.highPrice > 0) st.high24h = t.highPrice;
+    if (Number.isFinite(t.lowPrice) && t.lowPrice > 0) st.low24h = t.lowPrice;
+    if (Number.isFinite(t.priceChangePercent)) st.changePct24h = t.priceChangePercent;
+    st.quoteFromTicker = true;
+
+    /* §1.2.1  Real bid-ask spread. A crossed or zero book is skipped rather
+       than published, so a bad row cannot masquerade as zero slippage. */
+    if (
+      Number.isFinite(t.bidPrice) &&
+      Number.isFinite(t.askPrice) &&
+      t.bidPrice > 0 &&
+      t.askPrice > t.bidPrice
+    ) {
+      st.spreadPct = ((t.askPrice - t.bidPrice) / t.lastPrice) * 100;
+    }
+
+    /* Keep every materialised timeframe glued to the live price. */
+    for (const tfs of Object.values(st.tf)) {
+      const forming = tfs.candles[tfs.candles.length - 1];
+      if (!forming) continue;
+      if (t.lastPrice > forming.h) forming.h = t.lastPrice;
+      if (t.lastPrice < forming.l) forming.l = t.lastPrice;
+      forming.c = t.lastPrice;
+    }
+    return true;
+  }
+
+  /**
+   * §1.2.2  Attach a live USDT-M perpetual funding rate.
+   *
+   * `hasPerpetual` drives Column 11: a coin with no perpetual shows an em
+   * dash, so it must only be set when a contract genuinely exists.
+   */
+  applyFunding(symbol: string, fundingRatePct: number): boolean {
+    const st = this.symbols.get(symbol);
+    if (!st) return false;
+    if (!Number.isFinite(fundingRatePct)) return false;
+    st.hasPerpetual = true;
+    st.fundingRatePct = fundingRatePct;
+    return true;
+  }
+
+  /**
+   * §1.2.2  Reconcile perpetual coverage against the live funding map.
+   *
+   * `applyFunding` can only set the flag to true, and the simulated profile
+   * assigns `hasPerpetual` at random. So a coin with no perpetual contract
+   * would keep a fabricated flag — and Column 11 would show a funding rate
+   * for a market that has no funding — for as long as the process lived.
+   *
+   * The exchange's answer is authoritative in both directions, so a coin
+   * missing from the map is cleared rather than left at its simulated value.
+   */
+  reconcileFunding(rates: Map<string, number>): { withPerp: number; spotOnly: number } {
+    let withPerp = 0;
+    let spotOnly = 0;
+    for (const st of this.symbols.values()) {
+      if (!st.enabled) continue;
+      const rate = rates.get(st.entry.symbol);
+      if (rate === undefined || !Number.isFinite(rate)) {
+        st.hasPerpetual = false;
+        st.fundingRatePct = null;
+        spotOnly += 1;
+      } else {
+        st.hasPerpetual = true;
+        st.fundingRatePct = rate;
+        withPerp += 1;
+      }
+    }
+    return { withPerp, spotOnly };
   }
 
   /** Roll candles that have reached their interval boundary. */
@@ -497,6 +774,20 @@ export class MarketStore {
     }
 
     const refClose = candles[Math.max(0, n - 25)].c;
+
+    if (st.quoteFromTicker) {
+      /* Real 24h statistics are already on the symbol. Extend only the
+         intrabar extremes so a new high or low shows immediately; the 24h
+         change and volume are refreshed by the next bulk ticker pull. */
+      st.high24h = Math.max(st.high24h, st.price, h === -Infinity ? st.price : h);
+      st.low24h = Math.min(
+        st.low24h > 0 ? st.low24h : st.price,
+        st.price,
+        l === Infinity ? st.price : l,
+      );
+      return;
+    }
+
     st.changePct24h = refClose > 0 ? ((st.price - refClose) / refClose) * 100 : 0;
     st.high24h = h === -Infinity ? st.price : h;
     st.low24h = l === Infinity ? st.price : l;
@@ -541,6 +832,8 @@ export class MarketStore {
       pivotsHigh: pivotHighs(candles, 5, 5),
       pivotsLow: pivotLows(candles, 5, 5),
       ob: this.findOrderBlock(candles, atr),
+      obDemand: this.findOrderBlock(candles, atr, 'DEMAND'),
+      obSupply: this.findOrderBlock(candles, atr, 'SUPPLY'),
       hb: this.findHiddenBull(candles, rsiSeries),
       wr500: backtestAlphaSniper(candles.slice(-500)),
       swingHigh20: highestHigh(candles, 20),
@@ -550,7 +843,12 @@ export class MarketStore {
 
   /* --------------------------- Order Block (§7.2) ------------------------- */
 
-  private findOrderBlock(candles: Candle[], atr: number): ObState | null {
+  /**
+   * @param want  Restrict the search to one side. The Coin Finder filters on
+   *   bullish and bearish OB distance independently, so it needs the nearest
+   *   zone of each type — not just whichever one happens to be more recent.
+   */
+  private findOrderBlock(candles: Candle[], atr: number, want?: 'DEMAND' | 'SUPPLY'): ObState | null {
     if (atr <= 0 || candles.length < 30) return null;
     const obP = getScanParams('order-block');
     const minWidth = obP.minAtrWidth * atr;
@@ -566,7 +864,7 @@ export class MarketStore {
       if (!i1 || !i3) continue;
 
       // Bullish demand: last bearish candle before a 3-bar impulse + BOS + FVG.
-      if (kc.c < kc.o) {
+      if (kc.c < kc.o && want !== 'SUPPLY') {
         const swingHigh = highestHigh(candles.slice(Math.max(0, k - lookback), k + 1), lookback);
         const impulseClose = i3.c;
         const fvg = candles[k + 2] && candles[k + 2].l > kc.h;
@@ -580,7 +878,7 @@ export class MarketStore {
       }
 
       // Bearish supply: last bullish candle before a 3-bar drop + BOS + FVG.
-      if (kc.c > kc.o) {
+      if (kc.c > kc.o && want !== 'DEMAND') {
         const swingLow = lowestLow(candles.slice(Math.max(0, k - lookback), k + 1), lookback);
         const impulseClose = i3.c;
         const fvg = candles[k + 2] && candles[k + 2].h < kc.l;
@@ -689,6 +987,20 @@ export class MarketStore {
     const a = this.getAnalysis(st, tf);
     const zoneOb = a.ob;
 
+    /* §4.2  Distance to the nearest zone of each type, as a positive
+       percentage — 0 while price is inside the zone, null when the pattern
+       simply is not present. Callers filter on proximity, so a missing zone
+       must read as "not applicable", never as 0. */
+    const obDistancePct = (zone: ObState | null): number | null => {
+      if (!zone) return null;
+      if (!(st.price > 0)) return null;
+      if (st.price >= zone.lo && st.price <= zone.hi) return 0;
+      const edge = st.price < zone.lo ? zone.lo : zone.hi;
+      return Math.abs(edge - st.price) / st.price * 100;
+    };
+    const bullObDistPct = obDistancePct(a.obDemand ?? null);
+    const bearObDistPct = obDistancePct(a.obSupply ?? null);
+
     let obStatus: ObStatus = 'NONE';
     if (zoneOb) {
       const inside = st.price >= zoneOb.lo && st.price <= zoneOb.hi;
@@ -735,6 +1047,8 @@ export class MarketStore {
       prevClose,
       obStatus,
       emaStatus,
+      bullObDistPct,
+      bearObDistPct,
       wr500:
         st.backfilled500 && a.wr500.closed >= Math.round(getScanParams('alpha-sniper').minClosedTrades)
           ? (a.wr500.wins / a.wr500.closed) * 100
@@ -776,8 +1090,15 @@ export class MarketStore {
     const movers: TopMover[] = [];
     let spotlight: Spotlight | null = null;
 
+    /* §1.1  Every enabled coin is present on every response — including coins
+       still waiting on their kline backfill, which now render from a baseline
+       instead of being silently dropped. */
+    this.ensureBaselines(tf, now);
+
     for (const st of this.symbols.values()) {
-      if (!st.tf[tf] || !st.enabled) continue;
+      if (!st.enabled) continue;
+      const tfs = st.tf[tf];
+      if (!tfs) continue;
       const snap = this.snapshot(st, tf, now, cycle);
       coins.push(snap);
 

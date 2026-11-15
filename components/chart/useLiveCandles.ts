@@ -21,6 +21,44 @@ import type { Candle } from '@/lib/indicators';
 /** Public data mirrors, tried in order — never the geo-blocked api.binance.com. */
 const WS_HOSTS = ['wss://data-stream.binance.vision:443', 'wss://stream.binance.com:9443'] as const;
 
+/**
+ * §6.2  Same mirrors for REST, used as the browser-side last resort when our
+ * own `/api/market/klines` route does not answer.
+ */
+const REST_HOSTS = ['https://data-api.binance.vision', 'https://api.binance.com'] as const;
+
+/**
+ * §6.2  Fetch klines straight from the exchange, bypassing our server.
+ *
+ * Only ever called after `/api/market/klines` has already failed, so it adds
+ * no cost in the normal case. Returns `null` — never throws — so the caller
+ * can fall through to its next option.
+ */
+async function fetchDirect(symbol: string, tf: Timeframe): Promise<Candle[] | null> {
+  for (const host of REST_HOSTS) {
+    try {
+      const url = `${host}/api/v3/klines?symbol=${symbol}&interval=${TF_TO_BINANCE[tf]}&limit=500`;
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) continue;
+      const raw = (await res.json()) as unknown[][];
+      if (!Array.isArray(raw) || !raw.length) continue;
+      const out = raw.map((k) => ({
+        t: Number(k[0]),
+        o: Number(k[1]),
+        h: Number(k[2]),
+        l: Number(k[3]),
+        c: Number(k[4]),
+        v: Number(k[7]),
+        x: true,
+      }));
+      if (out.length && out.every((c) => Number.isFinite(c.c) && c.c > 0)) return out;
+    } catch {
+      /* try the next mirror */
+    }
+  }
+  return null;
+}
+
 export interface LiveCandles {
   candles: Candle[];
   loading: boolean;
@@ -151,10 +189,33 @@ export function useLiveCandles(symbol: string, tf: Timeframe, enabled = true): L
       })
       .catch(() => {
         if (disposed || id !== requestId.current) return;
-        setError('NETWORK');
-        setLoading(false);
+        /*
+         * §6.2  Zero NO_DATA guarantee, browser tier.
+         *
+         * If the server route failed (timeout, cold start, serverless freeze)
+         * ask the exchange directly from the browser. The browser has its own
+         * network path and is not subject to the function's time budget, so
+         * this succeeds in cases the server route cannot.
+         */
+        fetchDirect(symbol, tf)
+          .then((direct) => {
+            if (disposed || id !== requestId.current) return;
+            if (direct?.length) {
+              setCandles(direct);
+              setSource('upstream');
+            } else {
+              setError('NETWORK');
+            }
+            setLoading(false);
+            connect();
+          })
+          .catch(() => {
+            if (disposed || id !== requestId.current) return;
+            setError('NETWORK');
+            setLoading(false);
+            connect();
+          });
         /* Still try the socket — it may work even if the REST seed failed. */
-        connect();
       });
 
     return () => {

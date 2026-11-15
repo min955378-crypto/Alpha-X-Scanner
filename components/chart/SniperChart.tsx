@@ -120,6 +120,14 @@ interface ObZone {
   kind: 'DEMAND' | 'SUPPLY';
 }
 
+/** §6.1  An order block projected onto the price pane, in pixels. */
+interface ObBand {
+  key: string;
+  kind: 'DEMAND' | 'SUPPLY';
+  y: number;
+  h: number;
+}
+
 /**
  * §4.4  Unmitigated order blocks: the last opposing candle before an impulsive
  * move. Kept deliberately small (max 3 zones) so the chart stays readable.
@@ -210,6 +218,7 @@ export function SniperChart({ candles, symbol, height = 460, onHudChange, setup 
   const ema34Series = useRef<ISeriesApi<'Line'> | null>(null);
   const oscLineSeries = useRef<ISeriesApi<'Line'> | null>(null);
   const [hud, setHud] = useState<BacktestHud>({ trades: 0, win: 0, loss: 0, active: 0, winRate: null });
+  const [obBands, setObBands] = useState<ObBand[]>([]);
 
   const derived = useMemo(() => {
     if (!candles.length) return null;
@@ -223,6 +232,59 @@ export function SniperChart({ candles, symbol, height = 460, onHudChange, setup 
       hud: backtest(closes, alphaSniper(closes)),
     };
   }, [candles]);
+
+  /**
+   * §6.1  Project the order block zones onto the price pane.
+   *
+   * lightweight-charts has no rectangle primitive, so the bands are an
+   * absolutely positioned overlay whose geometry comes from the series' own
+   * `priceToCoordinate`. That keeps them glued to the price axis through
+   * scrolling, zooming and live ticks.
+   *
+   * The subscription is keyed on the zone signature rather than on `derived`,
+   * because `derived` is rebuilt on every one-second tick — re-subscribing
+   * that often would churn the chart's listener list for no benefit.
+   */
+  const zonesRef = useRef<ObZone[]>([]);
+  zonesRef.current = derived?.zones ?? [];
+  const zoneKey = (derived?.zones ?? [])
+    .map((z) => `${z.from}:${z.kind}:${z.top}:${z.bottom}`)
+    .join('|');
+
+  useEffect(() => {
+    const series = candleSeries.current;
+    const chart = chartRef.current;
+    if (!series || !chart) {
+      setObBands([]);
+      return;
+    }
+
+    const recompute = () => {
+      const next: ObBand[] = [];
+      for (const z of zonesRef.current) {
+        const yTop = series.priceToCoordinate(z.top);
+        const yBottom = series.priceToCoordinate(z.bottom);
+        if (yTop === null || yBottom === null) continue;
+        const y = Math.min(yTop, yBottom);
+        const h = Math.abs(yBottom - yTop);
+        if (!Number.isFinite(y) || !Number.isFinite(h)) continue;
+        next.push({ key: `${z.from}-${z.kind}`, kind: z.kind, y, h });
+      }
+      setObBands(next);
+    };
+
+    recompute();
+    chart.timeScale().subscribeVisibleTimeRangeChange(recompute);
+
+    const ro = new ResizeObserver(recompute);
+    if (mainRef.current) ro.observe(mainRef.current);
+
+    return () => {
+      chart.timeScale().unsubscribeVisibleTimeRangeChange(recompute);
+      ro.disconnect();
+    };
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [zoneKey]);
 
   /* Publish the HUD upward so the page can render it as a table. */
   useEffect(() => {
@@ -460,7 +522,27 @@ export function SniperChart({ candles, symbol, height = 460, onHudChange, setup 
         </div>
       </div>
 
-      <div ref={mainRef} style={{ height }} />
+      {/* §6.1  Shaded order block zones, drawn over the price pane. */}
+      <div className="relative">
+        <div ref={mainRef} style={{ height }} />
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          {obBands.map((b) => (
+            <div
+              key={b.key}
+              title={`${b.kind === 'DEMAND' ? 'Bullish Demand' : 'Bearish Supply'} order block`}
+              className="absolute inset-x-0"
+              style={{
+                top: b.y,
+                height: Math.max(1, b.h),
+                background:
+                  b.kind === 'DEMAND' ? 'rgba(34, 197, 94, 0.16)' : 'rgba(239, 68, 68, 0.16)',
+                borderTop: `1px solid ${b.kind === 'DEMAND' ? '#22C55E' : '#EF4444'}`,
+                borderBottom: `1px solid ${b.kind === 'DEMAND' ? '#22C55E' : '#EF4444'}`,
+              }}
+            />
+          ))}
+        </div>
+      </div>
 
       <div className="border-t border-white/[0.06]">
         <div className="flex items-center justify-between px-3 pt-1.5 text-[9px] uppercase tracking-wider text-text-muted">

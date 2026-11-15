@@ -15,6 +15,9 @@ import {
   WEIGHT_CAP_PER_MIN,
   WeightMeter,
   activeProviderId,
+  fetchFundingRates,
+  fetchKlines,
+  fetchTickers,
   fetchUniverse,
   klinesWeight,
   probe,
@@ -47,6 +50,26 @@ const CYCLE_MS = 60_000;
 const PHASE_A_RPS = Number(process.env.ALPHAX_PHASE_A_RPS ?? 20);
 /** §2.2  Phase B: 3.5 req/s × weight 5 → 1,050 weight/min, ~2.9 min. */
 const PHASE_B_RPS = Number(process.env.ALPHAX_PHASE_B_RPS ?? 3.5);
+/**
+ * §1.2  Bulk 24h ticker refresh. One request covers all 600+ coins, so this is
+ * cheap; it is what keeps the 24h change, high/low and quote volume real after
+ * the socket (which carries price and volume only) has been running.
+ */
+const TICKER_REFRESH_MS = 60_000;
+/**
+ * §1.2.2  Funding rates settle every 8h on Binance. Refreshing far more often
+ * than that is wasted weight, but often enough that a new period shows up
+ * promptly.
+ */
+const FUNDING_REFRESH_MS = 5 * 60_000;
+/**
+ * §1.3  Parallel kline warm-up. 40 concurrent sockets finishes the book in
+ * ~15 waves; higher concurrency trips Binance's rate limiter and earns a 429
+ * that costs far more time than the parallelism saves.
+ */
+const KLINE_CONCURRENCY = 40;
+/** §1.3  99 candles → REST weight 1 per symbol (100 would cost 2). */
+const KLINE_WARMUP_LIMIT = 99;
 const RISK_REFRESH_MS = 60 * 60 * 1000;
 
 class Engine {
@@ -80,6 +103,8 @@ class Engine {
   riskError: string | null = null;
 
   requestedTimeframes = new Set<Timeframe>(['1H']);
+  /** §1.3  Timeframes whose real kline warm-up has already been kicked off. */
+  private warmedTfs = new Set<Timeframe>();
   requestedScanners = new Set<ScannerSlug>(SCANNERS.map((s) => s.slug));
   wsClients = 0;
 
@@ -175,9 +200,21 @@ class Engine {
       console.log('[engine] !miniTicker@arr stream attached (0 REST weight)');
     }
 
+    /* §1.2  Pull the whole book's quotes and funding rates in two requests.
+       Deliberately not awaited: on a serverless host the first frame must not
+       wait on a network round trip. The baseline the store just built is what
+       the first request serves; this upgrades every coin to real numbers the
+       moment it lands, typically inside a second. */
+    void this.hydrateLive();
+
     this.tickTimer = setInterval(() => this.onTick(), TICK_MS);
     this.cycleTimer = setInterval(() => this.onCycle(), CYCLE_MS);
     setInterval(() => void this.refreshRisk(), RISK_REFRESH_MS).unref?.();
+
+    if (this.dataMode === 'LIVE') {
+      setInterval(() => void this.pullTickers(), TICKER_REFRESH_MS).unref?.();
+      setInterval(() => void this.pullFunding(), FUNDING_REFRESH_MS).unref?.();
+    }
   }
 
   private startPhaseB(): void {
@@ -202,11 +239,122 @@ class Engine {
     }, Math.max(20, Math.round(1000 / PHASE_B_RPS)));
   }
 
+  /* ---------------------------- §1.2 live quotes -------------------------- */
+
+  /**
+   * §1.2  Replace simulated quotes with the real book in one round trip.
+   *
+   * Two requests — spot 24h tickers and perpetual funding — cover all 600+
+   * coins. Doing this per-symbol would be 600 requests and would blow the REST
+   * weight budget before the first frame was ever served.
+   */
+  private async hydrateLive(): Promise<void> {
+    if (this.dataMode !== 'LIVE') return;
+    await Promise.all([this.pullTickers(), this.pullFunding()]);
+    /* §1.3  Only now is the volume ordering real, so warm the default
+       timeframe after the tickers land rather than alongside them. */
+    void this.warmKlines('1H');
+  }
+
+  /** §1.2.1  Bulk spot tickers → price, 24h change/volume/high/low, spread. */
+  private async pullTickers(): Promise<void> {
+    try {
+      const tickers = await fetchTickers();
+      if (!tickers) return;
+      let applied = 0;
+      for (const t of tickers.values()) {
+        if (this.store.applyTicker(t)) applied += 1;
+      }
+      /* Drop cached frames: they were built from the pre-ticker prices. */
+      this.frames.clear();
+      console.log(`[engine] bulk ticker applied — ${applied}/${tickers.size} coins`);
+    } catch (err) {
+      console.warn('[engine] bulk ticker failed', err instanceof Error ? err.message : err);
+    }
+  }
+
+  /* ---------------------------- §1.3 kline warm-up ------------------------ */
+
+  /**
+   * §1.3  Pull real candles for every coin in fast concurrent batches.
+   *
+   * `limit=99` is deliberate: Binance charges weight 1 for ≤99 candles and
+   * weight 2 above that, so the whole 600-coin book costs ~601 weight — inside
+   * the 1,200/min cap — instead of 1,202, which would tip the meter over.
+   * 500-candle history arrives later via Phase B and the on-demand chart
+   * route, both of which already exist.
+   *
+   * Batches are ordered by 24h quote volume descending, so if the process is
+   * frozen mid-run (routine on serverless) the coins that got real history are
+   * the ones traders actually look at. Everything else keeps its baseline
+   * rather than disappearing from the frame.
+   *
+   * Never throws and never blocks boot — the frame is already complete from
+   * the baseline, so a failure here only means the coins stay synthetic until
+   * the next attempt.
+   */
+  private async warmKlines(tf: Timeframe): Promise<void> {
+    if (this.dataMode !== 'LIVE') return;
+    if (this.warmedTfs.has(tf)) return;
+    this.warmedTfs.add(tf);
+
+    const symbols = this.store
+      .list()
+      .filter((st) => st.enabled)
+      .sort((a, b) => b.quoteVol24h - a.quoteVol24h)
+      .map((st) => st.entry.symbol);
+
+    const startedAt = Date.now();
+    let real = 0;
+    let failed = 0;
+
+    for (let i = 0; i < symbols.length; i += KLINE_CONCURRENCY) {
+      const batch = symbols.slice(i, i + KLINE_CONCURRENCY);
+      const results = await Promise.allSettled(
+        batch.map((sym) => fetchKlines(sym, tf, KLINE_WARMUP_LIMIT)),
+      );
+      for (let j = 0; j < batch.length; j += 1) {
+        const r = results[j];
+        if (r.status === 'fulfilled' && r.value && r.value.length) {
+          if (this.store.seedFromCandles(batch[j], tf, r.value)) real += 1;
+          else failed += 1;
+        } else {
+          failed += 1;
+        }
+      }
+      this.meter.add(batch.length * klinesWeight(KLINE_WARMUP_LIMIT));
+    }
+
+    /* Frames built during the warm-up describe the old candles. */
+    this.frames.clear();
+    console.log(
+      `[engine] ${tf} kline warm-up — ${real} real, ${failed} fallback ` +
+        `(${Date.now() - startedAt}ms, ${symbols.length} coins @ ${KLINE_CONCURRENCY} concurrent)`,
+    );
+  }
+
+  /** §1.2.2  Perpetual funding rates → Column 11 of the Pro Table. */
+  private async pullFunding(): Promise<void> {
+    try {
+      const rates = await fetchFundingRates();
+      if (!rates) return;
+      /* Reconciled rather than merged: a coin absent from the exchange's map
+         has no perpetual, and must be cleared rather than left carrying the
+         simulated profile's flag. */
+      const { withPerp, spotOnly } = this.store.reconcileFunding(rates);
+      this.frames.clear();
+      console.log(`[engine] funding rates applied — ${withPerp} perpetuals, ${spotOnly} spot-only`);
+    } catch (err) {
+      console.warn('[engine] funding sync failed', err instanceof Error ? err.message : err);
+    }
+  }
+
   /* -------------------------------- ticks -------------------------------- */
 
   private onTick(): void {
     const now = Date.now();
-    this.store.tick(now, 1);
+    /* LIVE prices belong to the ticker feed and the socket, not the simulator. */
+    this.store.tick(now, 1, this.dataMode === 'LIVE');
     const closed = this.store.rollCandles(now);
     if (closed > 0) console.log(`[engine] rolled ${closed} candles`);
 
@@ -308,6 +456,10 @@ class Engine {
 
   requestTimeframe(tf: Timeframe): void {
     this.requestedTimeframes.add(tf);
+    /* §7.1  A newly requested timeframe has only baseline candles. Warm it in
+       the background; the baseline it serves in the meantime is complete and
+       valid, so the switch is instant either way. */
+    void this.warmKlines(tf);
     if (!this.frames.has(tf)) {
       const frame = this.store.buildFrame(tf, Date.now(), 60, this.cycle, this.dataMode, this.boot, this.riskUpdatedAt);
       this.frames.set(tf, frame);

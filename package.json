@@ -19,7 +19,8 @@
     "qa:totp": "tsx scripts/qa-totp.ts",
     "qa:admin-auth": "tsx scripts/qa-admin-auth.ts",
     "qa:admin-http": "tsx scripts/qa-admin-http.ts",
-    "qa:serverless": "tsx scripts/qa-serverless.ts"
+    "qa:serverless": "tsx scripts/qa-serverless.ts",
+    "qa:live": "tsx scripts/qa-live.ts"
   },
   "dependencies": {
     "lightweight-charts": "^4.2.3",

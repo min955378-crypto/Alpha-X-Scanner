@@ -44,6 +44,13 @@ export interface WireCoin {
   es: number;
   w5: number | null;
   ct: number;
+  /**
+   * §4.2  Distance to the nearest unmitigated bullish (demand) order block,
+   * as a positive percent; null when the pattern is absent.
+   */
+  odb: number | null;
+  /** §4.2  Same, for the nearest bearish (supply) order block. */
+  ods: number | null;
   fl: number;
   /** §7.3  Score (0–100) — transmitted, never recomputed per-surface. */
   sc: number;
@@ -82,6 +89,10 @@ export function encodeCoin(c: CoinSnapshot): WireCoin {
     es: Math.max(0, EMA_CODES.indexOf(c.emaStatus)),
     w5: c.wr500 === null ? null : r2(c.wr500),
     ct: c.closedTrades500,
+    /* §4.2  Null must survive the round trip: "no zone" and "inside the zone"
+       are different answers and the Coin Finder filters on both. */
+    odb: c.bullObDistPct === null ? null : r2(c.bullObDistPct),
+    ods: c.bearObDistPct === null ? null : r2(c.bearObDistPct),
     sc: Math.max(0, Math.min(100, Math.round(c.score))),
     fl: (c.enabled ? FLAG_ENABLED : 0) | (c.hasPerpetual ? FLAG_PERPETUAL : 0) | (c.isMonitoringTag ? FLAG_MONITORING : 0),
   };
@@ -123,6 +134,8 @@ export function decodeCoin(w: WireCoin): CoinSnapshot {
     emaStatus: EMA_CODES[w.es] ?? 'NONE',
     wr500: w.w5,
     closedTrades500: w.ct,
+    bullObDistPct: w.odb ?? null,
+    bearObDistPct: w.ods ?? null,
     score: w.sc,
   };
 }
