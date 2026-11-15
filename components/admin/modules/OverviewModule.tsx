@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+
 import { BRAND } from '@/lib/constants';
 import { Icon } from '@/components/ui/Icons';
 import { Btn, Card, Kpi, Row } from '../shared';
@@ -46,6 +48,16 @@ export function OverviewModule({
             <Btn icon="download" onClick={() => onQuickAction('security')}>
               Backup State
             </Btn>
+            {/* §2.2  Emerald exit to the customer-facing website. */}
+            <Link
+              href="/dashboard"
+              title="Leave the admin portal and open the customer trading website"
+              className="flex items-center gap-1.5 rounded border border-emerald-500/55 bg-emerald-500/10 px-2.5 py-1 text-[10.5px] font-bold text-emerald-400 transition-colors hover:bg-emerald-500/20"
+              style={{ boxShadow: '0 0 10px rgba(16, 185, 129, 0.22)' }}
+            >
+              <Icon name="external" size={11} />
+              🌐 View Main Website
+            </Link>
           </>
         }
       >

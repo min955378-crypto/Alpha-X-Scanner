@@ -555,6 +555,94 @@ function normalizeTotpFields(user: UserRecord): UserRecord {
   return user;
 }
 
+/* -------------------------------------------------------------------------- */
+/* §1.2  Zero-SQL vault mirror                                                 */
+/* -------------------------------------------------------------------------- */
+
+/** Key inside the admin's `savedPresetsJson` carrying the customer vault. */
+const VAULT_KEY = '__vaultBackup';
+
+/**
+ * Seed rows are excluded from the vault on purpose. They are regenerated from
+ * `seed()` on every cold start, so backing them up would only spend payload
+ * re-uploading data the process already knows how to rebuild.
+ */
+const SEED_USERNAMES = new Set(['admin', 'demo']);
+const SEED_LICENSE_KEYS = new Set(['APS-9F4A-22C1-88E0', 'APS-TRIAL-AA17-K4M2']);
+
+interface VaultPayload {
+  v: 1;
+  users: UserRecord[];
+  licenses: LicenseRecord[];
+}
+
+/**
+ * §1.2  Embed every customer and their license keys into the admin's
+ * `savedPresetsJson`.
+ *
+ * Why this exists: a newly onboarded customer is written to the `User` and
+ * `LicenseKey` tables. If either write is rejected — a NOT NULL column, a type
+ * mismatch, a constraint added later — the customer exists in memory on this
+ * instance and nowhere else. The next cold start does not have them, and the
+ * customer logs in to "Username or password is incorrect."
+ *
+ * `savedPresetsJson` on the admin row is already proven to write and read in
+ * production (that is how the 2FA mirror works), so it is a second path to
+ * Postgres that no schema change to the other tables can break.
+ *
+ * The vault is a **safety net, not the source of truth**: on hydrate it only
+ * fills in rows that are genuinely missing, never overwriting what the real
+ * tables returned.
+ */
+function embedVault(
+  rows: UserRecord[],
+  users: UserRecord[],
+  licenses: LicenseRecord[],
+): UserRecord[] {
+  const payload: VaultPayload = {
+    v: 1,
+    users: users.filter((u) => !SEED_USERNAMES.has(u.username)),
+    licenses: licenses.filter((l) => !SEED_LICENSE_KEYS.has(l.keyString)),
+  };
+  if (!payload.users.length && !payload.licenses.length) return rows;
+
+  /* Prefer the owner's own row; fall back to any admin, then to row 0. */
+  const carrierIdx =
+    rows.findIndex((r) => r.username === 'admin') >= 0
+      ? rows.findIndex((r) => r.username === 'admin')
+      : rows.findIndex((r) => r.role === 'ADMIN') >= 0
+        ? rows.findIndex((r) => r.role === 'ADMIN')
+        : 0;
+  if (carrierIdx < 0) return rows;
+
+  const out = rows.slice();
+  const carrier = out[carrierIdx];
+  const presets = parseJsonColumn(carrier.savedPresetsJson) ?? {};
+  out[carrierIdx] = {
+    ...carrier,
+    savedPresetsJson: { ...presets, [VAULT_KEY]: payload },
+  };
+  return out;
+}
+
+/**
+ * §1.2  Pull the vault out of whichever row carries it, and strip it so the
+ * UI never sees it. Returns the payload plus the cleaned rows.
+ */
+function extractVault(rows: UserRecord[]): { rows: UserRecord[]; vault: VaultPayload | null } {
+  let vault: VaultPayload | null = null;
+  const out = rows.map((row) => {
+    const presets = parseJsonColumn(row.savedPresetsJson);
+    const found = presets?.[VAULT_KEY] as VaultPayload | undefined;
+    if (!found || !presets) return row;
+    if (!vault) vault = found;
+    const cleaned = { ...presets };
+    delete cleaned[VAULT_KEY];
+    return { ...row, savedPresetsJson: cleaned };
+  });
+  return { rows: out, vault };
+}
+
 /**
  * §13 schema, mapped onto in-memory indexes. Each `Map` is keyed by the field
  * that carried `@@id`; the §13 secondary indexes are noted per collection and
@@ -788,7 +876,18 @@ class Database {
   private pendingDeletes: PendingDelete[] = [];
 
   private syncTimer: ReturnType<typeof setTimeout> | null = null;
-  private syncing: Promise<void> | null = null;
+  private syncing: Promise<boolean> | null = null;
+
+  /**
+   * §1.2  Monotonic counter bumped by every mutation commit (`persist`).
+   *
+   * `flushedRevision` is the highest revision known to have reached Postgres.
+   * The gap between the two is what lets `flushToPostgres()` answer the only
+   * question a caller actually cares about — "is *my* write durable?" — instead
+   * of "did *a* write happen?". See the comment on `flushToPostgres`.
+   */
+  private revision = 0;
+  private flushedRevision = -1;
 
   /**
    * Replace the in-memory maps with whatever Postgres holds.
@@ -829,6 +928,24 @@ class Database {
     this.hydration = null;
   }
 
+  /**
+   * §1.1  Force a re-read of Postgres, whatever the cache holds.
+   *
+   * `ensureHydrated()` deliberately caches its promise for the life of the
+   * process. That is right for throughput, but on a serverless host it has a
+   * sharp consequence: Vercel runs several instances concurrently. An admin
+   * creating a customer on instance A writes to Postgres; instance B already
+   * holds a hydration promise from before that customer existed, so it never
+   * looks again and the customer's first login fails with BAD_CREDENTIALS.
+   *
+   * Every entry point that must not be served from stale memory calls this
+   * instead — sign-in, and any admin mutation.
+   */
+  async refreshFromPostgres(): Promise<boolean> {
+    this.hydration = null;
+    return this.hydrateFromPostgres();
+  }
+
   async hydrateFromPostgres(): Promise<boolean> {
     if (!pgEnabled()) return false;
     try {
@@ -845,13 +962,26 @@ class Database {
 
       let hydrated = false;
 
-      if (users?.length) {
+      const vaulted = extractVault(users ?? []);
+
+      if (vaulted.rows.length) {
         /* §1.2  Rehydrate 2FA from the `savedPresetsJson` copy when the real
            columns were stripped on write. See `restoreTotpBackup`. */
         this.users = new Map(
-          users.map((u) => [u.id, normalizeTotpFields(restoreTotpBackup(u))]),
+          vaulted.rows.map((u) => [u.id, normalizeTotpFields(restoreTotpBackup(u))]),
         );
         hydrated = true;
+      }
+
+      /* §1.2  Restore any customer the real tables failed to hold. */
+      if (vaulted.vault) {
+        const restored = this.restoreVault(vaulted.vault);
+        if (restored.users || restored.licenses) {
+          console.log(
+            `[db] vault restored ${restored.users} user(s) and ${restored.licenses} license(s) missing from Postgres`,
+          );
+          hydrated = true;
+        }
       }
       if (licenses?.length) {
         this.licenses = new Map(licenses.map((l) => [l.id, l]));
@@ -882,12 +1012,49 @@ class Database {
         hydrated = true;
       }
 
+      /* Memory and Postgres now agree, so there is nothing pending to flush.
+         Without this, the first `flushToPostgres()` after a cold start would
+         push back rows it has only just read. */
+      if (hydrated) this.flushedRevision = this.revision;
+
       if (hydrated) console.log('[db] hydrated from Supabase Postgres');
       return hydrated;
     } catch {
       /* Postgres unreachable — keep serving from the in-memory store. */
       return false;
     }
+  }
+
+  /**
+   * §1.2  Fill gaps from the vault mirror.
+   *
+   * Only rows that are genuinely absent are added. The real `User` and
+   * `LicenseKey` tables stay authoritative: if Postgres has a row, its version
+   * stands, because it is the one receiving live writes. Treating the vault as
+   * authoritative would let a stale snapshot resurrect a deleted customer or
+   * quietly undo a revoked key.
+   */
+  private restoreVault(vault: VaultPayload): { users: number; licenses: number } {
+    let users = 0;
+    let licenses = 0;
+
+    if (vault.v === 1 && Array.isArray(vault.users)) {
+      for (const u of vault.users) {
+        if (!u?.id || !u?.username) continue;
+        if (this.users.has(u.id)) continue;
+        this.users.set(u.id, normalizeTotpFields({ ...u }));
+        users += 1;
+      }
+    }
+    if (vault.v === 1 && Array.isArray(vault.licenses)) {
+      for (const l of vault.licenses) {
+        if (!l?.id || !l?.keyString) continue;
+        if (this.licenses.has(l.id)) continue;
+        this.licenses.set(l.id, { ...l });
+        licenses += 1;
+      }
+    }
+    return { users, licenses };
   }
 
   /** Debounced write-behind so a burst of mutations costs one round trip. */
@@ -902,44 +1069,127 @@ class Database {
   }
 
   /**
+   * How many times one `flushToPostgres()` call will re-run to catch up with
+   * mutations that landed while it was writing. Bounded so a pathological
+   * write storm degrades to "slightly behind" rather than an endless loop.
+   */
+  private static readonly MAX_FLUSH_PASSES = 8;
+
+  /**
    * Push the current in-memory state to Postgres.
    *
-   * Safe to call concurrently: overlapping calls share one in-flight promise,
-   * and a caller that needs the write to land before it returns (an admin API
-   * route on serverless, where the process may freeze) can await it directly.
+   * Safe to call concurrently, and — critically — **it will not report success
+   * for a snapshot taken before the caller's own mutation.**
+   *
+   * The previous implementation shared one in-flight promise:
+   *
+   *     if (this.syncing) return this.syncing;
+   *
+   * That is a correctness bug on the onboarding path. The in-flight flush
+   * copied `[...this.users.values()]` at the instant it started; a customer
+   * created while those round trips were in the air was simply absent from the
+   * payload, yet every caller who awaited `flushToPostgres()` afterwards was
+   * handed that stale promise and told the write had landed. The customer then
+   * existed in memory on one instance and nowhere else, and the next cold start
+   * greeted them with "Username or password is incorrect."
+   *
+   * The fix is a revision check. `persist()` bumps `revision` on every commit;
+   * a flush records the revision it wrote. If the counter moved while the write
+   * was in flight, we go round again. A caller therefore returns either having
+   * persisted its own mutation or having genuinely exhausted its retries —
+   * never having silently persisted someone else's older snapshot.
    */
   async flushToPostgres(): Promise<void> {
     if (!pgEnabled()) return;
-    if (this.syncing) return this.syncing;
 
-    this.syncing = (async () => {
-      try {
-        /* Deletions first. `pgUpsert` only ever writes rows that are still in
-           memory, so a row removed here would otherwise survive in Postgres
-           and come back on the next cold start. Draining the queue before the
-           upserts also means a delete + recreate of the same id in one tick
-           ends in the correct final state. */
-        await this.drainPendingDeletes();
-        /* §1.1  Mirror each user's TOTP state into `savedPresetsJson`, which is
-           already in the schema, so 2FA survives even if the `totp*` columns
-           have not been migrated. See `withTotpBackup`. */
-        await pgUpsert(PG_TABLES.users, [...this.users.values()].map(withTotpBackup), 'id');
-        await pgUpsert(PG_TABLES.licenses, [...this.licenses.values()], 'id');
-        await pgUpsert(PG_TABLES.scannerConfigs, [...this.scannerConfigs.values()], 'slug');
-        await pgUpsert(PG_TABLES.systemConfig, [{ id: 1, ...this.systemConfig }], 'id');
-        await pgUpsert(PG_TABLES.coins, Object.values(this.coinOverrides), 'symbol');
-        await pgUpsert(PG_TABLES.signals, [...this.customSignals.values()], 'id');
-        await pgUpsert(PG_TABLES.riskItems, [...this.riskItems.values()], 'id');
-        await pgUpsert(PG_TABLES.auditLogs, this.auditLogs.slice(0, 500), 'id');
-      } catch {
-        /* Durability is best-effort; never take the engine down for it. */
+    for (let pass = 0; pass < Database.MAX_FLUSH_PASSES; pass += 1) {
+      /* Let an in-flight flush finish first, then re-decide. Sharing the
+         promise alone is not enough — its snapshot may predate our write. */
+      if (this.syncing) {
+        try {
+          await this.syncing;
+        } catch {
+          /* The owning caller surfaces its own failure; keep looping. */
+        }
+        continue;
       }
-    })();
 
-    try {
-      await this.syncing;
-    } finally {
-      this.syncing = null;
+      const target = this.revision;
+      if (target === this.flushedRevision) return; // already durable
+
+      this.syncing = (async () => {
+        let ok = true;
+        try {
+          /* Deletions first. `pgUpsert` only ever writes rows that are still in
+             memory, so a row removed here would otherwise survive in Postgres
+             and come back on the next cold start. Draining the queue before the
+             upserts also means a delete + recreate of the same id in one tick
+             ends in the correct final state. */
+          await this.drainPendingDeletes();
+
+          /* §1.1  Mirror each user's TOTP state into `savedPresetsJson`, which is
+             already in the schema, so 2FA survives even if the `totp*` columns
+             have not been migrated. See `withTotpBackup`. */
+          const userRows = [...this.users.values()].map(withTotpBackup);
+          const licenseRows = [...this.licenses.values()];
+
+          /* §1.2  Mirror the customer vault into the admin's presets. */
+          const withVault = embedVault(userRows, [...this.users.values()], licenseRows);
+
+          /*
+           * §1.2  Foreign-key-safe ordering.
+           *
+           * `User.licenseKeyId` and `LicenseKey.assignedUserId` point at each
+           * other, so whichever table is written first references a row that
+           * does not exist yet. Writing users with a null binding, then the
+           * licenses, then the bindings resolves both directions without ever
+           * asking the database to accept a dangling reference.
+           *
+           * (Production currently declares no foreign keys at all, so this costs
+           * one extra round trip purely as insurance against one being added —
+           * at which point an unordered write would start failing with 409s on
+           * exactly the onboarding path that matters most.)
+           */
+          ok = (await pgUpsert(
+            PG_TABLES.users,
+            withVault.map((u) => ({ ...u, licenseKeyId: null })),
+            'id',
+          )) && ok;
+          ok = (await pgUpsert(PG_TABLES.licenses, licenseRows, 'id')) && ok;
+          const bound = new Set(licenseRows.map((l) => l.id));
+          ok = (await pgUpsert(
+            PG_TABLES.users,
+            withVault.map((u) => ({ ...u, licenseKeyId: bound.has(u.licenseKeyId ?? '') ? u.licenseKeyId : null })),
+            'id',
+          )) && ok;
+
+          await pgUpsert(PG_TABLES.scannerConfigs, [...this.scannerConfigs.values()], 'slug');
+          await pgUpsert(PG_TABLES.systemConfig, [{ id: 1, ...this.systemConfig }], 'id');
+          await pgUpsert(PG_TABLES.coins, Object.values(this.coinOverrides), 'symbol');
+          await pgUpsert(PG_TABLES.signals, [...this.customSignals.values()], 'id');
+          await pgUpsert(PG_TABLES.riskItems, [...this.riskItems.values()], 'id');
+          await pgUpsert(PG_TABLES.auditLogs, this.auditLogs.slice(0, 500), 'id');
+        } catch {
+          /* Durability is best-effort; never take the engine down for it. */
+          ok = false;
+        }
+        return ok;
+      })();
+
+      let ok = false;
+      try {
+        ok = await this.syncing;
+      } catch {
+        ok = false;
+      } finally {
+        this.syncing = null;
+      }
+
+      if (ok && target > this.flushedRevision) this.flushedRevision = target;
+
+      /* Nothing new landed while we were writing — this caller's mutation is
+         durable. Otherwise loop and flush the newer state. */
+      if (this.revision === target) return;
     }
   }
 
@@ -963,6 +1213,10 @@ class Database {
     } catch {
       /* Read-only filesystem — operate purely in memory. */
     }
+    /* §1.2  Record that the in-memory state is now ahead of Postgres, so
+       `flushToPostgres()` knows an in-flight flush's snapshot is stale. */
+    this.revision += 1;
+
     /* Mirror to Postgres regardless: on a serverless host the file write above
        is the part that will not survive, not the mirror. */
     this.schedulePostgresSync();
@@ -970,8 +1224,19 @@ class Database {
 
   /* ------------------------------- users -------------------------------- */
 
+  /**
+   * §1.3  Case-insensitive, whitespace-tolerant username lookup.
+   *
+   * Mobile keyboards capitalise the first letter by default, so a customer
+   * typing `Ali` into a field registered as `ali` used to land on
+   * "Username or password is incorrect." Matching is therefore done on the
+   * trimmed, lower-cased form on both sides.
+   */
   userByUsername(username: string): UserRecord | undefined {
-    for (const u of this.users.values()) if (u.username.toLowerCase() === username.toLowerCase()) return u;
+    const needle = username.trim().toLowerCase();
+    for (const u of this.users.values()) {
+      if (u.username.trim().toLowerCase() === needle) return u;
+    }
     return undefined;
   }
 

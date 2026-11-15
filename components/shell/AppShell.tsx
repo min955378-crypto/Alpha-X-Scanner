@@ -57,6 +57,16 @@ export function AppShell({
       if (!onAdminRoute) router.replace('/login');
       return;
     }
+    /*
+     * §2.3  The disclaimer is a customer-facing risk notice. On /admin the
+     * owner is operating the business, not trading, and an interstitial over
+     * the portal on every refresh was both noise and a way to lose an
+     * unsaved onboarding form. It is suppressed entirely on admin routes.
+     */
+    if (onAdminRoute) {
+      setShowDisclaimer(false);
+      return;
+    }
     // §1.4  The local `alphax:v2:*` mirror wins, so a failed server write can
     // never re-open the modal on the next refresh.
     if (user.acceptedDisclaimerAt || hasAcceptedDisclaimer(user.username)) {

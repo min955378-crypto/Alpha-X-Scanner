@@ -7,10 +7,24 @@ import { getDb, type UserRecord } from '@/server/engine/db';
 export async function requireAdmin(
   req: Request,
 ): Promise<{ admin: UserRecord } | { response: NextResponse }> {
-  /* §8.2  A cold serverless instance starts from the default seed. Without
-     this, the guard can authenticate against (or persist) seed data instead of
-     the real rows in Postgres. */
-  await getDb().ensureHydrated();
+  /*
+   * §8.2  A cold serverless instance starts from the default seed. Without
+   * this, the guard can authenticate against (or persist) seed data instead of
+   * the real rows in Postgres.
+   *
+   * §1.1  A mutation additionally forces a fresh read. Vercel runs several
+   * instances side by side, so instance B's cached hydration can predate a
+   * change instance A just committed — and a mutation built on that stale
+   * view would then write it back, clobbering the newer state. Reads keep the
+   * cheap cached path; anything that writes starts from what Postgres actually
+   * holds right now.
+   */
+  const method = req.method.toUpperCase();
+  if (method === 'GET' || method === 'HEAD') {
+    await getDb().ensureHydrated();
+  } else {
+    await getDb().refreshFromPostgres();
+  }
 
   const user = sessionUserFromToken(parseCookies(req.headers.get('cookie'))[SESSION_COOKIE]);
   if (!user) return { response: NextResponse.json({ ok: false, error: 'UNAUTHENTICATED' }, { status: 401 }) };

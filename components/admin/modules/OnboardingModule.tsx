@@ -91,7 +91,17 @@ function buildWelcomeMessage(c: Credentials, origin: string): string {
   ].join('\n');
 }
 
-export function OnboardingModule() {
+interface OnboardingProps {
+  reload: () => void | Promise<void>;
+  toast: (text: string, level?: 'ok' | 'warn') => void;
+}
+
+/**
+ * @param reload  §1.4  Refreshes the portal's server data so the new customer
+ *                appears in the Users / Licenses tables immediately.
+ * @param toast   §1.4  Surfaces the persistence outcome to the operator.
+ */
+export function OnboardingModule({ reload, toast }: OnboardingProps) {
   const [username, setUsername] = useState(() => randomUsername());
   const [password, setPassword] = useState(() => strongPassword());
   const [whatsapp, setWhatsapp] = useState('');
@@ -102,6 +112,9 @@ export function OnboardingModule() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creds, setCreds] = useState<Credentials | null>(null);
+  /* §1.4  True only when the API re-read Postgres and replayed the login gate
+     successfully. Drives the green "verified" badge. */
+  const [verified, setVerified] = useState(false);
 
   const effectiveDays = customDays.trim() ? Math.max(1, Math.min(3650, Number(customDays) || 30)) : duration;
 
@@ -111,6 +124,7 @@ export function OnboardingModule() {
     setWhatsapp('');
     setCustomDays('');
     setCreds(null);
+    setVerified(false);
     setError(null);
   };
 
@@ -129,12 +143,33 @@ export function OnboardingModule() {
           maxDevices,
         }),
       });
-      const json = (await res.json()) as { ok: boolean; error?: string; credentials?: Credentials };
+      const json = (await res.json()) as {
+        ok: boolean;
+        error?: string;
+        credentials?: Credentials;
+        verifiedReady?: boolean;
+      };
       if (!json.ok || !json.credentials) {
         setError(ERROR_COPY[json.error ?? 'UNKNOWN'] ?? 'Could not create the customer. Please retry.');
         return;
       }
       setCreds(json.credentials);
+      setVerified(json.verifiedReady === true);
+
+      /*
+       * §1.4  Tell the operator the truth about persistence. A customer that
+       * reached Postgres and passed a replayed login check is safe to hand
+       * over; one that did not must be flagged now, not discovered later when
+       * the customer reports that they cannot sign in.
+       */
+      if (json.verifiedReady === true) {
+        toast('Customer saved to Supabase & verified — ready for login.', 'ok');
+      } else {
+        toast('Customer created, but the Supabase write could not be verified. Ask them to retry login before escalating.', 'warn');
+      }
+
+      /* §1.4  Pull the new rows into Users / Licenses straight away. */
+      await reload();
     } catch {
       setError('Network error — the customer was not created.');
     } finally {
@@ -228,7 +263,7 @@ export function OnboardingModule() {
       {/* --------------------------- delivery card -------------------------- */}
       <div>
         {creds ? (
-          <CredentialsCard creds={creds} onAnother={reset} />
+          <CredentialsCard creds={creds} verified={verified} onAnother={reset} />
         ) : (
           <Card title="Ready-to-Deliver Credentials" icon="key" subtitle="Appears here the moment the customer is created.">
             <p className="px-3 py-8 text-center text-[11px] text-text-muted">
@@ -243,7 +278,15 @@ export function OnboardingModule() {
   );
 }
 
-function CredentialsCard({ creds, onAnother }: { creds: Credentials; onAnother: () => void }) {
+function CredentialsCard({
+  creds,
+  verified,
+  onAnother,
+}: {
+  creds: Credentials;
+  verified: boolean;
+  onAnother: () => void;
+}) {
   const origin = typeof window === 'undefined' ? '' : window.location.origin;
   const message = buildWelcomeMessage(creds, origin);
   const intl = toWhatsAppIntl(creds.whatsappNumber);
@@ -257,6 +300,22 @@ function CredentialsCard({ creds, onAnother }: { creds: Credentials; onAnother: 
         <Icon name="check" size={13} className="text-emerald-400" />
         <h3 className="text-[12px] font-bold text-amber-300">Customer Created — Ready to Deliver</h3>
       </header>
+
+      {/* §1.4  Green confirmation that the credentials were read back out of
+          Supabase and passed the login checks. */}
+      <div className="border-b border-white/[0.06] px-3 py-2">
+        {verified ? (
+          <p className="flex items-center gap-1.5 rounded border border-emerald-500/45 bg-emerald-500/[0.10] px-2.5 py-1.5 text-[11px] font-semibold text-emerald-400">
+            <Icon name="check" size={11} />
+            Saved to Supabase &amp; Verified — Ready for Customer Login
+          </p>
+        ) : (
+          <p className="flex items-center gap-1.5 rounded border border-amber-500/45 bg-amber-500/[0.10] px-2.5 py-1.5 text-[11px] font-semibold text-amber-300">
+            <Icon name="warning" size={11} />
+            Created, but not yet verified in Supabase — do not send until it turns green
+          </p>
+        )}
+      </div>
 
       <pre className="mono-num max-h-[300px] overflow-auto whitespace-pre-wrap border-b border-white/[0.06] bg-black/40 p-3 text-[10.5px] leading-relaxed text-text-bright">
         {message}
