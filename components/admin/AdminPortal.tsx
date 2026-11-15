@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { BRAND } from '@/lib/constants';
@@ -159,9 +160,21 @@ export function AdminPortal() {
             </h1>
             <p className="text-[10.5px] text-text-muted">{moduleDef.blurb}</p>
           </div>
-          <Btn icon="refresh" onClick={() => void reload()}>
-            Refresh Data
-          </Btn>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {/* §2.2  The one-way door back to the customer-facing website. */}
+            <Link
+              href="/dashboard"
+              title="Leave the admin portal and open the customer trading website"
+              className="flex items-center gap-1.5 rounded border border-emerald-500/55 bg-emerald-500/10 px-2.5 py-1 text-[10.5px] font-bold text-emerald-400 transition-colors hover:bg-emerald-500/20"
+              style={{ boxShadow: '0 0 10px rgba(16, 185, 129, 0.22)' }}
+            >
+              <Icon name="external" size={11} />
+              🌐 View Main Website
+            </Link>
+            <Btn icon="refresh" onClick={() => void reload()}>
+              Refresh Data
+            </Btn>
+          </div>
         </header>
 
         {active === 'overview' ? (
