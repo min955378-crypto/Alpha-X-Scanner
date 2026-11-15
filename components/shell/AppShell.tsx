@@ -36,6 +36,10 @@ export function AppShell({
   const { boot, setTimeframe, timeframe } = useMarket();
   const { settings, hydrated } = useSettings();
   const router = useRouter();
+  const pathname = usePathname();
+  /* §1.1  `/admin` renders its own dedicated sign-in gate in place, so the
+     shell must not bounce it to `/login` when a session lapses. */
+  const onAdminRoute = pathname?.startsWith('/admin') ?? false;
   const [showDisclaimer, setShowDisclaimer] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -50,7 +54,7 @@ export function AppShell({
   useEffect(() => {
     if (loading) return;
     if (!user) {
-      router.replace('/login');
+      if (!onAdminRoute) router.replace('/login');
       return;
     }
     // §1.4  The local `alphax:v2:*` mirror wins, so a failed server write can
@@ -60,7 +64,7 @@ export function AppShell({
       return;
     }
     setShowDisclaimer(true);
-  }, [loading, user, router]);
+  }, [loading, user, router, onAdminRoute]);
 
   // Keep the market socket on the timeframe this user saved in /settings.
   useEffect(() => {

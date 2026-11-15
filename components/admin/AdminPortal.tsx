@@ -16,6 +16,7 @@ import { CoinsModule } from './modules/CoinsModule';
 import { RiskModule } from './modules/RiskModule';
 import { BrandingModule } from './modules/BrandingModule';
 import { SecurityModule } from './modules/SecurityModule';
+import { AuthenticatorModule } from './modules/AuthenticatorModule';
 
 /**
  * The 100%-complete Admin Command Center.
@@ -27,7 +28,9 @@ import { SecurityModule } from './modules/SecurityModule';
 export function AdminPortal() {
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [active, setActive] = useState<ModuleId>('overview');
+  /* §3.2  Module 2 (1-Click Add Customer) is the action the owner performs
+     most, so it is the module the portal opens on. */
+  const [active, setActive] = useState<ModuleId>('onboarding');
   const [toastMsg, setToastMsg] = useState<{ text: string; level: 'ok' | 'warn' } | null>(null);
 
   const toast = useCallback((text: string, level: 'ok' | 'warn' = 'ok') => {
@@ -190,6 +193,7 @@ export function AdminPortal() {
         {active === 'onboarding' ? <OnboardingModule /> : null}
         {active === 'licenses' ? <LicensesModule data={data} reload={reload} toast={toast} /> : null}
         {active === 'users' ? <UsersModule data={data} reload={reload} toast={toast} /> : null}
+        {active === 'security2fa' ? <AuthenticatorModule data={data} reload={reload} toast={toast} /> : null}
         {active === 'scanners' ? <ScannersModule configs={data.scannerConfigs} reload={reload} toast={toast} /> : null}
         {active === 'coins' ? <CoinsModule data={data} reload={reload} toast={toast} /> : null}
         {active === 'risk' ? <RiskModule data={data} reload={reload} toast={toast} /> : null}

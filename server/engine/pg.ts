@@ -84,6 +84,36 @@ export async function pgUpsert(table: string, rows: unknown[], onConflict: strin
   }
 }
 
+/**
+ * §3.1  Deletes rows matching `column = value`.
+ *
+ * `flushToPostgres()` only ever upserts, so a deleted user or a deleted license
+ * key was still present in Postgres and reappeared on the next cold start when
+ * `hydrateFromPostgres()` ran. Deletions therefore have to be replayed
+ * explicitly.
+ *
+ * Returns false when Postgres is unusable or the request fails, so callers can
+ * carry on — a failed delete is the same durability degradation a failed
+ * upsert is, not a reason to break the request.
+ */
+export async function pgDeleteById(table: string, column: string, value: string): Promise<boolean> {
+  if (!pgEnabled()) return false;
+  if (!value) return false;
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/${table}?${column}=eq.${encodeURIComponent(value)}`,
+      {
+        method: 'DELETE',
+        headers: headers({ Prefer: 'return=minimal' }),
+        cache: 'no-store',
+      },
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 /** Strips the singleton `id` column so a config row matches `SystemConfig`. */
 export function toSystemConfigRow(row: Record<string, unknown> | null | undefined): SystemConfig {
   if (!row) return { ...DEFAULT_SYSTEM_CONFIG };
