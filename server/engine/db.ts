@@ -876,7 +876,18 @@ class Database {
   private pendingDeletes: PendingDelete[] = [];
 
   private syncTimer: ReturnType<typeof setTimeout> | null = null;
-  private syncing: Promise<void> | null = null;
+  private syncing: Promise<boolean> | null = null;
+
+  /**
+   * §1.2  Monotonic counter bumped by every mutation commit (`persist`).
+   *
+   * `flushedRevision` is the highest revision known to have reached Postgres.
+   * The gap between the two is what lets `flushToPostgres()` answer the only
+   * question a caller actually cares about — "is *my* write durable?" — instead
+   * of "did *a* write happen?". See the comment on `flushToPostgres`.
+   */
+  private revision = 0;
+  private flushedRevision = -1;
 
   /**
    * Replace the in-memory maps with whatever Postgres holds.
@@ -1001,6 +1012,11 @@ class Database {
         hydrated = true;
       }
 
+      /* Memory and Postgres now agree, so there is nothing pending to flush.
+         Without this, the first `flushToPostgres()` after a cold start would
+         push back rows it has only just read. */
+      if (hydrated) this.flushedRevision = this.revision;
+
       if (hydrated) console.log('[db] hydrated from Supabase Postgres');
       return hydrated;
     } catch {
@@ -1053,76 +1069,127 @@ class Database {
   }
 
   /**
+   * How many times one `flushToPostgres()` call will re-run to catch up with
+   * mutations that landed while it was writing. Bounded so a pathological
+   * write storm degrades to "slightly behind" rather than an endless loop.
+   */
+  private static readonly MAX_FLUSH_PASSES = 8;
+
+  /**
    * Push the current in-memory state to Postgres.
    *
-   * Safe to call concurrently: overlapping calls share one in-flight promise,
-   * and a caller that needs the write to land before it returns (an admin API
-   * route on serverless, where the process may freeze) can await it directly.
+   * Safe to call concurrently, and — critically — **it will not report success
+   * for a snapshot taken before the caller's own mutation.**
+   *
+   * The previous implementation shared one in-flight promise:
+   *
+   *     if (this.syncing) return this.syncing;
+   *
+   * That is a correctness bug on the onboarding path. The in-flight flush
+   * copied `[...this.users.values()]` at the instant it started; a customer
+   * created while those round trips were in the air was simply absent from the
+   * payload, yet every caller who awaited `flushToPostgres()` afterwards was
+   * handed that stale promise and told the write had landed. The customer then
+   * existed in memory on one instance and nowhere else, and the next cold start
+   * greeted them with "Username or password is incorrect."
+   *
+   * The fix is a revision check. `persist()` bumps `revision` on every commit;
+   * a flush records the revision it wrote. If the counter moved while the write
+   * was in flight, we go round again. A caller therefore returns either having
+   * persisted its own mutation or having genuinely exhausted its retries —
+   * never having silently persisted someone else's older snapshot.
    */
   async flushToPostgres(): Promise<void> {
     if (!pgEnabled()) return;
-    if (this.syncing) return this.syncing;
 
-    this.syncing = (async () => {
-      try {
-        /* Deletions first. `pgUpsert` only ever writes rows that are still in
-           memory, so a row removed here would otherwise survive in Postgres
-           and come back on the next cold start. Draining the queue before the
-           upserts also means a delete + recreate of the same id in one tick
-           ends in the correct final state. */
-        await this.drainPendingDeletes();
-
-        /* §1.1  Mirror each user's TOTP state into `savedPresetsJson`, which is
-           already in the schema, so 2FA survives even if the `totp*` columns
-           have not been migrated. See `withTotpBackup`. */
-        const userRows = [...this.users.values()].map(withTotpBackup);
-        const licenseRows = [...this.licenses.values()];
-
-        /* §1.2  Mirror the customer vault into the admin's presets. */
-        const withVault = embedVault(userRows, [...this.users.values()], licenseRows);
-
-        /*
-         * §1.2  Foreign-key-safe ordering.
-         *
-         * `User.licenseKeyId` and `LicenseKey.assignedUserId` point at each
-         * other, so whichever table is written first references a row that
-         * does not exist yet. Writing users with a null binding, then the
-         * licenses, then the bindings resolves both directions without ever
-         * asking the database to accept a dangling reference.
-         *
-         * (Production currently declares no foreign keys at all, so this costs
-         * one extra round trip purely as insurance against one being added —
-         * at which point an unordered write would start failing with 409s on
-         * exactly the onboarding path that matters most.)
-         */
-        await pgUpsert(
-          PG_TABLES.users,
-          withVault.map((u) => ({ ...u, licenseKeyId: null })),
-          'id',
-        );
-        await pgUpsert(PG_TABLES.licenses, licenseRows, 'id');
-        const bound = new Set(licenseRows.map((l) => l.id));
-        await pgUpsert(
-          PG_TABLES.users,
-          withVault.map((u) => ({ ...u, licenseKeyId: bound.has(u.licenseKeyId ?? '') ? u.licenseKeyId : null })),
-          'id',
-        );
-
-        await pgUpsert(PG_TABLES.scannerConfigs, [...this.scannerConfigs.values()], 'slug');
-        await pgUpsert(PG_TABLES.systemConfig, [{ id: 1, ...this.systemConfig }], 'id');
-        await pgUpsert(PG_TABLES.coins, Object.values(this.coinOverrides), 'symbol');
-        await pgUpsert(PG_TABLES.signals, [...this.customSignals.values()], 'id');
-        await pgUpsert(PG_TABLES.riskItems, [...this.riskItems.values()], 'id');
-        await pgUpsert(PG_TABLES.auditLogs, this.auditLogs.slice(0, 500), 'id');
-      } catch {
-        /* Durability is best-effort; never take the engine down for it. */
+    for (let pass = 0; pass < Database.MAX_FLUSH_PASSES; pass += 1) {
+      /* Let an in-flight flush finish first, then re-decide. Sharing the
+         promise alone is not enough — its snapshot may predate our write. */
+      if (this.syncing) {
+        try {
+          await this.syncing;
+        } catch {
+          /* The owning caller surfaces its own failure; keep looping. */
+        }
+        continue;
       }
-    })();
 
-    try {
-      await this.syncing;
-    } finally {
-      this.syncing = null;
+      const target = this.revision;
+      if (target === this.flushedRevision) return; // already durable
+
+      this.syncing = (async () => {
+        let ok = true;
+        try {
+          /* Deletions first. `pgUpsert` only ever writes rows that are still in
+             memory, so a row removed here would otherwise survive in Postgres
+             and come back on the next cold start. Draining the queue before the
+             upserts also means a delete + recreate of the same id in one tick
+             ends in the correct final state. */
+          await this.drainPendingDeletes();
+
+          /* §1.1  Mirror each user's TOTP state into `savedPresetsJson`, which is
+             already in the schema, so 2FA survives even if the `totp*` columns
+             have not been migrated. See `withTotpBackup`. */
+          const userRows = [...this.users.values()].map(withTotpBackup);
+          const licenseRows = [...this.licenses.values()];
+
+          /* §1.2  Mirror the customer vault into the admin's presets. */
+          const withVault = embedVault(userRows, [...this.users.values()], licenseRows);
+
+          /*
+           * §1.2  Foreign-key-safe ordering.
+           *
+           * `User.licenseKeyId` and `LicenseKey.assignedUserId` point at each
+           * other, so whichever table is written first references a row that
+           * does not exist yet. Writing users with a null binding, then the
+           * licenses, then the bindings resolves both directions without ever
+           * asking the database to accept a dangling reference.
+           *
+           * (Production currently declares no foreign keys at all, so this costs
+           * one extra round trip purely as insurance against one being added —
+           * at which point an unordered write would start failing with 409s on
+           * exactly the onboarding path that matters most.)
+           */
+          ok = (await pgUpsert(
+            PG_TABLES.users,
+            withVault.map((u) => ({ ...u, licenseKeyId: null })),
+            'id',
+          )) && ok;
+          ok = (await pgUpsert(PG_TABLES.licenses, licenseRows, 'id')) && ok;
+          const bound = new Set(licenseRows.map((l) => l.id));
+          ok = (await pgUpsert(
+            PG_TABLES.users,
+            withVault.map((u) => ({ ...u, licenseKeyId: bound.has(u.licenseKeyId ?? '') ? u.licenseKeyId : null })),
+            'id',
+          )) && ok;
+
+          await pgUpsert(PG_TABLES.scannerConfigs, [...this.scannerConfigs.values()], 'slug');
+          await pgUpsert(PG_TABLES.systemConfig, [{ id: 1, ...this.systemConfig }], 'id');
+          await pgUpsert(PG_TABLES.coins, Object.values(this.coinOverrides), 'symbol');
+          await pgUpsert(PG_TABLES.signals, [...this.customSignals.values()], 'id');
+          await pgUpsert(PG_TABLES.riskItems, [...this.riskItems.values()], 'id');
+          await pgUpsert(PG_TABLES.auditLogs, this.auditLogs.slice(0, 500), 'id');
+        } catch {
+          /* Durability is best-effort; never take the engine down for it. */
+          ok = false;
+        }
+        return ok;
+      })();
+
+      let ok = false;
+      try {
+        ok = await this.syncing;
+      } catch {
+        ok = false;
+      } finally {
+        this.syncing = null;
+      }
+
+      if (ok && target > this.flushedRevision) this.flushedRevision = target;
+
+      /* Nothing new landed while we were writing — this caller's mutation is
+         durable. Otherwise loop and flush the newer state. */
+      if (this.revision === target) return;
     }
   }
 
@@ -1146,6 +1213,10 @@ class Database {
     } catch {
       /* Read-only filesystem — operate purely in memory. */
     }
+    /* §1.2  Record that the in-memory state is now ahead of Postgres, so
+       `flushToPostgres()` knows an in-flight flush's snapshot is stale. */
+    this.revision += 1;
+
     /* Mirror to Postgres regardless: on a serverless host the file write above
        is the part that will not survive, not the mirror. */
     this.schedulePostgresSync();
