@@ -70,7 +70,10 @@ export function Kpi({
     white: { text: '#FFFFFF', border: 'rgba(255,255,255,0.16)', glow: 'rgba(255,255,255,0.10)' },
     emerald: { text: '#22C55E', border: '#22C55E', glow: 'rgba(34,197,94,0.30)' },
     amber: { text: '#F5B301', border: '#F5B301', glow: 'rgba(245,179,1,0.30)' },
-    red: { text: '#EF4444', border: '#EF4444', glow: 'rgba(239,68,68,0.30)' },
+    /* §4.1  Split red: `#EF4444` is locked to the bear surfaces (candles, SHORT
+       badges, --tile-extreme-border, .btn-red). Text uses the lighter
+       `#F87171` for WCAG AA contrast. */
+    red: { text: '#F87171', border: '#EF4444', glow: 'rgba(239,68,68,0.30)' },
     violet: { text: '#A78BFA', border: '#8B5CF6', glow: 'rgba(139,92,246,0.30)' },
     blue: { text: '#60A5FA', border: '#3B82F6', glow: 'rgba(59,130,246,0.30)' },
   };

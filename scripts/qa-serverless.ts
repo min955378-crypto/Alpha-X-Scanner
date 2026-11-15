@@ -296,6 +296,125 @@ async function main(): Promise<void> {
     );
   }
 
+  /* ------------------------------------------- §1 zero-SQL 2FA persistence */
+  console.log('\n§1   2FA survives an unmigrated User table (zero-SQL fallback)');
+  {
+    const { totpCode } = await import('../server/engine/totp');
+
+    /* The exact production hazard: the `totp*` columns were never added by
+       manual SQL, so PostgREST rejects them and `pgUpsert` strips them. */
+    missingColumns = ['totpSecret', 'totpEnabled', 'totpLastCounter'];
+    hardFailUpserts = 0;
+
+    store = {
+      User: [
+        {
+          id: 'unmigrated-admin',
+          username: 'owner',
+          email: null,
+          passwordHash: 'scrypt$salt$hash',
+          whatsappNumber: null,
+          role: 'ADMIN',
+          plan: 'ULTRA_PRO',
+          isSuspended: false,
+          canAccessV1Scaling: true,
+          canAccessOrderBlock: true,
+          canAccessEmaCrossover: true,
+          canAccessHiddenBullish: true,
+          canAccessAlphaSniper: true,
+          preferredTimeframe: '1H',
+          tileDensity: 'COMFORTABLE',
+          soundEnabled: true,
+          chartMode: 'INTERNAL',
+          timezonePref: 'Asia/Karachi',
+          watchlistSymbols: [],
+          savedPresetsJson: null,
+          acceptedDisclaimerAt: null,
+          licenseKeyId: null,
+          createdAt: 1,
+          lastSeenAt: null,
+        },
+      ],
+    };
+
+    const db = getDb();
+    db.resetHydration();
+    await db.hydrateFromPostgres();
+
+    const admin = db.userById('unmigrated-admin');
+    check('the unmigrated admin hydrated', admin !== undefined);
+    check('and arrived with no 2FA state', !admin?.totpSecret);
+
+    /* Pair for real: mint a secret, then verify a live code to enable it. */
+    const setup = db.totpSetup('unmigrated-admin');
+    check('pairing produced a secret', typeof setup?.secret === 'string' && setup.secret.length > 0);
+    const secret = setup?.secret ?? '';
+    const enabled = db.verifyAndEnableTotp('unmigrated-admin', totpCode(secret));
+    check('2FA was enabled with a valid code', enabled.ok === true);
+
+    log = [];
+    await db.flushToPostgres();
+
+    const posts = log.filter((e) => e.method === 'POST' && e.table === 'User');
+    const lastPost = posts[posts.length - 1];
+    check('the upsert really did have to strip the totp columns', posts.length > 1, `${posts.length} POSTs`);
+    check('the final payload carries no totpSecret column', !lastPost?.columns?.includes('totpSecret'));
+    check('the final payload still carries savedPresetsJson', Boolean(lastPost?.columns?.includes('savedPresetsJson')));
+
+    const written = (store.User ?? []).find((r) => r.id === 'unmigrated-admin') as
+      | Record<string, unknown>
+      | undefined;
+    check('the persisted row has NO totpSecret column', !('totpSecret' in (written ?? {})));
+    check(
+      'but it does carry the backup inside savedPresetsJson',
+      Boolean((written?.savedPresetsJson as Record<string, unknown> | null)?.__totpBackup),
+    );
+
+    /* Full cold start: throw away the in-memory record and rebuild from
+       Postgres alone. Whatever survives here is what the admin gets. */
+    db.resetHydration();
+    const rehydrated = await db.hydrateFromPostgres();
+    check('re-hydration succeeded', rehydrated === true);
+
+    const restored = db.userById('unmigrated-admin');
+    check('the secret survived the round trip', restored?.totpSecret === secret, restored?.totpSecret ?? 'MISSING');
+    check('the enabled flag survived the round trip', restored?.totpEnabled === true);
+    check(
+      'the backup key is NOT exposed to the UI',
+      !('__totpBackup' in ((restored?.savedPresetsJson as Record<string, unknown> | null) ?? {})),
+    );
+    check(
+      'a code from the restored secret still verifies',
+      db.checkTotp('unmigrated-admin', totpCode(secret)).ok === true,
+    );
+
+    /* A disabled account must stay disabled across the same round trip — the
+       fallback re-enabling a second factor the owner switched off would be a
+       lockout, not a rescue. */
+    db.disableTotp('unmigrated-admin', totpCode(secret));
+    await db.flushToPostgres();
+    db.resetHydration();
+    await db.hydrateFromPostgres();
+    const afterDisable = db.userById('unmigrated-admin');
+    check('disabling 2FA survives the round trip', afterDisable?.totpEnabled === false);
+    check('and the secret is retained for re-pairing', afterDisable?.totpSecret === secret);
+
+    /* `totpEnabled` is NOT NULL in Supabase. A row hydrated from a table that
+       predates the column arrives with it `undefined`, which JSON.stringify
+       silently drops — the write would then be rejected for a missing value. */
+    check(
+      'hydrated rows always carry a boolean totpEnabled',
+      typeof afterDisable?.totpEnabled === 'boolean',
+      String(afterDisable?.totpEnabled),
+    );
+    check(
+      'and a nullable totpLastCounter (never undefined)',
+      afterDisable?.totpLastCounter === null || typeof afterDisable?.totpLastCounter === 'number',
+    );
+
+    missingColumns = [];
+  }
+
   stop();
   console.log(`\n${passed} passed, ${failed} failed\n`);
   await new Promise<void>((resolve) => process.stdout.write('', () => resolve()));
