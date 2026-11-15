@@ -53,6 +53,7 @@ const PATHS = {
   filter: ['M3 5h18', 'M6 12h12M10 19h4'],
   book: ['M4 5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2V5Z', 'M8 7h7M8 11h7'],
   spark: ['M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1', 'M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z'],
+  warning: ['M12 3 2.5 20h19L12 3Z', 'M12 9.5V15M12 17.6h.01'],
 } as const;
 
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {

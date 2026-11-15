@@ -190,7 +190,7 @@ export function AdminPortal() {
             }}
           />
         ) : null}
-        {active === 'onboarding' ? <OnboardingModule /> : null}
+        {active === 'onboarding' ? <OnboardingModule reload={reload} toast={toast} /> : null}
         {active === 'licenses' ? <LicensesModule data={data} reload={reload} toast={toast} /> : null}
         {active === 'users' ? <UsersModule data={data} reload={reload} toast={toast} /> : null}
         {active === 'security2fa' ? <AuthenticatorModule data={data} reload={reload} toast={toast} /> : null}

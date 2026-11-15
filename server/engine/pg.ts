@@ -65,8 +65,18 @@ export async function pgSelect<T>(table: string, query = 'select=*'): Promise<T[
   }
 }
 
-/** How many unknown-column retries `pgUpsert` will attempt. */
-const MAX_UPSERT_RETRIES = 4;
+/**
+ * How many unknown-column retries `pgUpsert` will attempt.
+ *
+ * One retry per offending column, so this is effectively "how many unmigrated
+ * optional columns can one table have before we stop trying". Raised to 15
+ * because the cost of being wrong is severe and asymmetric: a too-low cap
+ * silently abandons the write, so a customer created in `/admin` never reaches
+ * Postgres and cannot log in. Each retry only happens on a 400, and only for
+ * tables that are actually missing columns — a healthy table still issues
+ * exactly one request.
+ */
+const MAX_UPSERT_RETRIES = 15;
 
 /**
  * §8.4  Pulls the offending column out of a PostgREST "unknown column" error.

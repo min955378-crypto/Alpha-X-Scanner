@@ -39,7 +39,10 @@ export async function POST(req: Request) {
 
   /* §8.2  Every path here reads or writes admin state, so hydration must
      finish first — including `login`, which is why this sits above it. */
-  await getDb().ensureHydrated();
+  /* §1.1  Same reasoning as `/api/auth/login`: another instance may have
+     changed the admin credentials since this process booted, and a cached
+     hydration promise would hide it. */
+  await getDb().refreshFromPostgres();
 
   const action = String(body.action ?? '');
 
