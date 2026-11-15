@@ -421,7 +421,139 @@ interface PendingDelete {
 /** §3.1  How many times a delete is retried before it is given up on. */
 const MAX_DELETE_ATTEMPTS = 3;
 
-/* ---------------------------------- DB ------------------------------------ */
+/* -------------------------------------------------------------------------- */
+/* §1  Zero-SQL 2FA persistence                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Key inside a user's `savedPresetsJson` that carries a copy of their TOTP
+ * state. See `withTotpBackup` for why this exists.
+ */
+const TOTP_BACKUP_KEY = '__totpBackup';
+
+interface TotpBackupPayload {
+  totpSecret: string | null;
+  totpEnabled: boolean;
+  totpLastCounter: number | null;
+}
+
+/**
+ * Reads a free-form JSON column into a plain object.
+ *
+ * `savedPresetsJson` arrives as an object from PostgREST's jsonb but is written
+ * by a user-facing endpoint, so it can legitimately be null, a JSON string, or
+ * (through a bad client) an array or scalar. Anything that is not a plain
+ * object is treated as "no presets" rather than thrown on.
+ */
+function parseJsonColumn(value: unknown): Record<string, unknown> | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : null;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return null;
+}
+
+/**
+ * §1.1  Returns a **wire copy** of the user with the TOTP state mirrored into
+ * `savedPresetsJson`.
+ *
+ * Why: `pgUpsert` survives an unmigrated column by stripping it (PGRST204). That
+ * resilience has a sharp edge — if the production `User` table lacks
+ * `totpSecret` / `totpEnabled` / `totpLastCounter`, the admin's 2FA pairing is
+ * silently dropped from every write and lost on the next cold start. Pairing
+ * would appear to succeed and then vanish, which is worse than failing loudly.
+ *
+ * `savedPresetsJson` is already in the schema, so mirroring the state into it
+ * gives the data a second route to Postgres that no migration can break. This
+ * is a belt-and-braces copy, not a replacement: the real columns are still sent
+ * and still win when present (see `restoreTotpBackup`).
+ *
+ * The in-memory record is never mutated — callers get a copy — so the UI can
+ * never observe this key.
+ */
+function withTotpBackup(user: UserRecord): UserRecord {
+  const backup: TotpBackupPayload = {
+    totpSecret: user.totpSecret ?? null,
+    totpEnabled: user.totpEnabled === true,
+    totpLastCounter:
+      typeof user.totpLastCounter === 'number' ? user.totpLastCounter : null,
+  };
+  const presets = parseJsonColumn(user.savedPresetsJson) ?? {};
+  return {
+    ...user,
+    /* `totpEnabled` is NOT NULL in Supabase. A row hydrated from a table that
+       predates the column arrives with `undefined` here, which JSON.stringify
+       drops — and a missing value is rejected just as a null one would be.
+       Normalising on the way out keeps every write valid. */
+    totpEnabled: backup.totpEnabled,
+    totpLastCounter: backup.totpLastCounter,
+    savedPresetsJson: { ...presets, [TOTP_BACKUP_KEY]: backup },
+  };
+}
+
+/**
+ * §1.2  Reverses `withTotpBackup` on a hydrated row.
+ *
+ * The carrier is always stripped, so it is never exposed to the UI, and the
+ * TOTP fields are restored only when the real columns came back empty (i.e.
+ * they were stripped on the way in, or do not exist at all).
+ *
+ * Restoring is deliberately gated on `totpSecret` being absent rather than on
+ * `totpEnabled`:
+ *
+ *  - `disableTotp` clears `totpEnabled` but keeps the secret, so a disabled
+ *    account hydrates with its secret intact and is NOT restored — that would
+ *    silently re-enable a second factor the owner just switched off.
+ *  - `rotateTotpSecret` writes a fresh, non-null secret, so it also never
+ *    triggers a restore from the older backup.
+ *
+ * The net effect is that the backup is consulted exactly when the columns told
+ * us nothing, which is the only case this fallback is meant to cover.
+ */
+function restoreTotpBackup(user: UserRecord): UserRecord {
+  const presets = parseJsonColumn(user.savedPresetsJson);
+  const backup = presets?.[TOTP_BACKUP_KEY] as Partial<TotpBackupPayload> | undefined;
+
+  const cleaned: Record<string, unknown> | null = presets ? { ...presets } : null;
+  if (cleaned) delete cleaned[TOTP_BACKUP_KEY];
+
+  const next: UserRecord = { ...user, savedPresetsJson: cleaned };
+
+  if (next.totpSecret) return next;
+  if (!backup || typeof backup.totpSecret !== 'string' || !backup.totpSecret) {
+    return next;
+  }
+
+  next.totpSecret = backup.totpSecret;
+  next.totpEnabled = backup.totpEnabled === true;
+  next.totpLastCounter =
+    typeof backup.totpLastCounter === 'number' ? backup.totpLastCounter : null;
+  return next;
+}
+
+/**
+ * §1.2  Fills in the TOTP fields on a row that predates them.
+ *
+ * `migrateTotpFields()` does this for the file snapshot; hydrated rows need the
+ * same treatment, otherwise `totpEnabled` stays `undefined` and the NOT NULL
+ * column in Supabase rejects the write.
+ */
+function normalizeTotpFields(user: UserRecord): UserRecord {
+  if (user.totpSecret === undefined) user.totpSecret = null;
+  if (user.totpEnabled === undefined) user.totpEnabled = false;
+  if (user.totpLastCounter === undefined) user.totpLastCounter = null;
+  return user;
+}
 
 /**
  * §13 schema, mapped onto in-memory indexes. Each `Map` is keyed by the field
@@ -714,7 +846,11 @@ class Database {
       let hydrated = false;
 
       if (users?.length) {
-        this.users = new Map(users.map((u) => [u.id, u]));
+        /* §1.2  Rehydrate 2FA from the `savedPresetsJson` copy when the real
+           columns were stripped on write. See `restoreTotpBackup`. */
+        this.users = new Map(
+          users.map((u) => [u.id, normalizeTotpFields(restoreTotpBackup(u))]),
+        );
         hydrated = true;
       }
       if (licenses?.length) {
@@ -784,7 +920,10 @@ class Database {
            upserts also means a delete + recreate of the same id in one tick
            ends in the correct final state. */
         await this.drainPendingDeletes();
-        await pgUpsert(PG_TABLES.users, [...this.users.values()], 'id');
+        /* §1.1  Mirror each user's TOTP state into `savedPresetsJson`, which is
+           already in the schema, so 2FA survives even if the `totp*` columns
+           have not been migrated. See `withTotpBackup`. */
+        await pgUpsert(PG_TABLES.users, [...this.users.values()].map(withTotpBackup), 'id');
         await pgUpsert(PG_TABLES.licenses, [...this.licenses.values()], 'id');
         await pgUpsert(PG_TABLES.scannerConfigs, [...this.scannerConfigs.values()], 'slug');
         await pgUpsert(PG_TABLES.systemConfig, [{ id: 1, ...this.systemConfig }], 'id');
