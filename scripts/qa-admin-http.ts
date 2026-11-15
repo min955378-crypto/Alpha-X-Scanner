@@ -191,6 +191,75 @@ async function main(): Promise<void> {
     check('a live code verifies', r.status === 200 && r.json.ok === true, `HTTP ${r.status}`);
   }
 
+  /* ------------------------------------------------------------ §1 ---- */
+  /*
+   * The end-to-end shape of the reported bug: the admin creates a customer,
+   * the customer tries to sign in, and gets "Username or password is
+   * incorrect."
+   *
+   * `/api/auth/login` now re-reads Postgres on every request (§1.1) and
+   * sanitises all three fields (§1.3), so the sign-in below is served by a
+   * genuinely fresh read even though the same process handled the onboarding.
+   * The in-process cold-start variant — `db.resetHydration()` between the two
+   * requests — lives in `qa:onboarding`, which can reach the Database object.
+   */
+  console.log('\n§1  A brand-new customer can sign in immediately');
+  {
+    const username = `qa-new-${Date.now().toString(36)}`;
+    const password = `Str0ng!${Date.now().toString(36)}`;
+
+    const made = await post(
+      '/api/admin/onboarding',
+      { username, password, whatsappNumber: null, durationDays: 30, maxDevices: 5 },
+      adminCookie,
+    );
+    check('onboarding returns HTTP 200', made.status === 200, `HTTP ${made.status}`);
+    const creds = made.json.credentials as { licenseKey?: string } | undefined;
+    check(
+      'a bound APS-XXXX-XXXX-XXXX key is minted',
+      /^APS-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(creds?.licenseKey ?? ''),
+      creds?.licenseKey ?? '',
+    );
+    check('§1.4  the API reports verifiedReady', made.json.verifiedReady === true, String(made.json.verifiedReady));
+
+    /* Hostile input, exactly as it arrives from a phone: first letter
+       capitalised by the keyboard, padding and a zero-width joiner pasted out
+       of WhatsApp, and the password wrapped in bold asterisks. */
+    const hostile = (v: string) => `  ${v.slice(0, 1).toUpperCase()}${v.slice(1)}\u200B  `;
+    const login = await post('/api/auth/login', {
+      username: hostile(username),
+      password: `*${password}*`,
+      licenseKey: `  ${(creds?.licenseKey ?? '').toLowerCase()}  `,
+    });
+    check('§1  the new customer signs in (HTTP 200)', login.status === 200, `HTTP ${login.status}`);
+    check('§1  the response is ok:true', login.json.ok === true, String(login.json.error ?? ''));
+    const who = login.json.user as { username?: string } | undefined;
+    check('the session belongs to the new customer', who?.username === username, String(who?.username));
+
+    /* The pristine credentials must keep working too. */
+    const plain = await post('/api/auth/login', {
+      username,
+      password,
+      licenseKey: creds?.licenseKey ?? '',
+    });
+    check('the untouched credentials also work', plain.status === 200 && plain.json.ok === true, `HTTP ${plain.status}`);
+
+    /* Sanitising must not have become "accept anything". */
+    const wrong = await post('/api/auth/login', {
+      username,
+      password: `${password}x`,
+      licenseKey: creds?.licenseKey ?? '',
+    });
+    check('a wrong password is still refused', wrong.status === 401, `HTTP ${wrong.status}`);
+
+    /* Leave the store as we found it. */
+    const ov = await getJson('/api/admin/overview', adminCookie);
+    const row = ((ov.json.users as Array<{ id: string; username: string }> | undefined) ?? []).find(
+      (u) => u.username === username,
+    );
+    if (row) await post('/api/admin/users', { action: 'delete', userId: row.id }, adminCookie);
+  }
+
   /* ------------------------------------------------------------ §3.1 ---- */
   console.log('\n§3.1  Deleting a user through the API');
   {
